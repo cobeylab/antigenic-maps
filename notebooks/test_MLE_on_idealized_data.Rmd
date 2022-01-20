@@ -1,0 +1,149 @@
+---
+title: "Bayesian MDS in Stan"
+output: html_notebook
+---
+
+Write and test a Stan model
+
+```{r}
+generate_alleles <- function(ndim, nalleles, range = 10){
+  # Randomly draw coordinates in each dimension
+  sapply(1:ndim, function(dim){runif(nalleles, -range/2, range)}) %>%
+    as.tibble() %>%
+    set_names(paste0('c', 1:ndim)) %>%
+    # Assign allele ids
+    mutate(allele = 1:nalleles)
+}
+```
+
+```{r}
+## Generate coordinates for a separate set of antigens (Ag) and sera (Ab)
+ab_df <- generate_alleles(2, 5)
+ag_df <- generate_alleles(2, 5)
+
+ab_coords <- as.matrix(ab_df %>% select(starts_with('c')))
+ag_coords <- as.matrix(ag_df %>% select(starts_with('c')))
+
+bind_rows(list('ab' = ab_df,
+               'ag' = ag_df),
+          .id = 'kind') %>%
+  ggplot(aes(x = c1, y = c2, color = kind)) +
+  geom_point()
+```
+
+```{r}
+## Calculate the distance matrix
+get_distances <- function(ab_coords, ag_coords){
+  is.ag.index = c(rep(TRUE, nrow(ag_coords)), rep(FALSE, nrow(ab_coords)))
+  all_distances <- dist(rbind(ab_coords, ag_coords), diag = T) %>%
+    as.matrix
+  ## Keep only d_ij where i is an antigen and j is an antibody
+  all_distances[is.ag.index, !is.ag.index]
+}
+```
+
+```{r}
+fit_MDS_MLE <- function(
+  observed_distances, # vector of delay for each individual in the data
+  n_antigens,
+  n_sera,
+  n_dim
+) {
+
+  stopifnot(nrow(observed_distances) == n_antigens)
+  stopifnot(ncol(observed_distances) == n_sera)
+  
+  loss_function <- function(pars, observed_distances, n_antigens, n_sera, n_dim){
+    stopifnot(length(pars) == (n_antigens+n_sera)*n_dim)
+    
+    estimated_ag_coords <- matrix(pars[1:(n_antigens*n_dim)], n_antigens, n_dim)
+    estimated_ab_coords <- matrix(pars[(n_antigens*n_dim+1):length(pars)], n_sera, n_dim)
+    
+    estimated_distances <- get_distances(estimated_ab_coords, estimated_ag_coords)
+    sqrt(sum(observed_distances - estimated_distances)^2)
+  }
+  
+  generate_initial_guess <- function(n_antigens, n_sera, n_dim){
+    ag_c1s <- runif(n_antigens, 0, 10); names(ag_c1s) = paste0('ag', 1:n_antigens, 'c1')
+    ag_c2s <- runif(n_antigens, 0, 10); names(ag_c2s) = paste0('ag', 1:n_antigens, 'c2')
+    ab_c1s <- runif(n_sera, 0, 10); names(ab_c1s) = paste0('ab', 1:n_antigens, 'c1')
+    ab_c2s <- runif(n_sera, 0, 10); names(ab_c2s) = paste0('ab', 1:n_antigens, 'c2')
+    
+    c(ag_c1s, ag_c2s, ab_c1s, ab_c2s)
+  }
+  
+  optim(par = generate_initial_guess(n_antigens, n_sera, n_dim),
+        fn = loss_function,
+        observed_distances = observed_distances,
+        n_antigens = n_antigens, 
+        n_sera = n_sera,
+        n_dim = n_dim,
+        control = list(maxit = 1000))
+}
+
+```
+
+```{r}
+fits <- fit_MDS_MLE(observed_distances = observed_distmat, n_antigens = 5, n_sera = 5, n_dim = 2)
+```
+
+## Transform to the standard basis:
+```{r}
+## Define function
+solve_for_transition_to_standard_basis <- function(mds_coords, original_coords){
+  loss_function <- function(pars, mds_coords, original_coords){
+    v1 = pars['v1']
+    v2 = pars['v2']
+    u1 = pars['u1']
+    u2 = pars['u2']
+    
+    Cprime = t(mds_coords)
+    C = t(original_coords)
+    
+    transition_matrix = matrix(c(v1, v2, u1, u2), 2, 2)
+    
+    sqrt(sum(((transition_matrix %*% Cprime)-C)^2))
+  }
+  
+  optim(par = c(v1 = 1, v2 = 2, u1 = 1, u2 = 2), fn = loss_function, mds_coords = mds_coords, original_coords = original_coords)
+}
+
+
+transform_to_standard_basis <- function(mds_coords, original_coords){
+  original_coords = as.matrix(original_coords)
+  transition_coords <- solve_for_transition_to_standard_basis(mds_coords, original_coords)
+  transition_matrix <- matrix(transition_coords$par, 2, 2)
+  transition_matrix %*% t(mds_coords) %>%
+    t() %>%
+    as.tibble() %>%
+    # Vertical and horizontal shift to re-center
+    mutate(V1 = V1 - mean(V1) + mean(original_coords[,1]),
+           V2 = V2 - mean(V2) + mean(original_coords[,2])) %>%
+    set_names(paste0('c', 1:2)) %>%
+    mutate(id = 1:n())
+}
+```
+
+```{r}
+## Apply function
+transformed_mds <- transform_to_standard_basis(mds_coords = fits_df %>% select(starts_with('c')) %>% as.matrix(), 
+                            original_coords = ab_ag_coordinates%>% select(starts_with('c')) %>% as.matrix()) %>%
+  mutate(kind = rep(c('strain', 'serum'), each = 5))
+```
+
+
+
+
+## Visualize fits using mean estimate for each coord
+```{r}
+bind_rows(list('raw_mds' = fits_df %>% mutate(id = as.numeric(id)), 
+              'actual' = ab_ag_coordinates %>% rename(id = allele),
+              'transformed_mds' = transformed_mds %>% select(c1, c2, id, kind)
+          ),
+          .id = 'source') %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, color = kind, shape = source))
+```
+
+
+--> This isn't really working. I'm not sure if it's a problem with the model or a mean/median posterior thing.

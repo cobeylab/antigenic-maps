@@ -1,0 +1,215 @@
+---
+title: "MDS Experiments"
+output: html_notebook
+---
+
+Test MDS and see how sensitive maps are to individual variation in Ab specificity.
+
+Initially, start with a single epitope and focus on differences in phenotype targeting due to OAS or set differences
+
+```{r}
+rm(list = ls())
+library(tidyverse)
+source('../code.R')
+```
+
+
+
+## 1. Randomly place 5 antigens and 5 antibodies on a 2D map
+
+* Coordinates are perfectly observed without measurement error
+
+```{r}
+set.seed(7)
+coords <- generate_map_coordinates(n_dim = 2, 
+                                   n_antigens = 5, 
+                                   n_sera = 5, 
+                                   map_range = c(-5, 5))
+coords
+```
+
+### Plot coords
+
+```{r}
+ggplot(coords) +
+  geom_point(aes(x = c1, y = c2)) +
+  ggtitle('Hypothetical strains on a 2d map')
+```
+
+## Calculate distances between coordinates
+
+* In practices only ab-ag distances are observed, but for prelimiary testing we assume perfect observation (ab-ab and ag-ag distances are observed too).
+
+```{r}
+distances <- get_all_distances(coords)
+distances
+```
+
+## Infer map using R's built-in metric MDS function, cmdscale
+```{r}
+mds_map <- cmdscale(distances, k = 2, add = T, eig = T, x.ret = T) 
+```
+
+We expect the inferred coordinates to be exactly equal to the true coordinates, due to perfect observation of the underlying distances.
+
+It looks like this could be true, but we have to transform back to the original basis to be sure.
+
+```{r}
+cowplot::plot_grid(
+  coords %>%
+  ggplot() +
+  geom_text(aes(x = c1, y = c2, label = id)) +
+  xlim(c(-7,7)) + ylim(c(-7,7)) +
+  ggtitle('Actual coordinates (black)'),
+as.tibble(mds_map$points) %>%
+  set_names(c('mds1', 'mds2')) %>%
+  mutate(id = 1:n()) %>%
+  ggplot() +
+  geom_text(aes(x = mds1, y = mds2, label = id), color = 'blue') +
+  xlim(c(-7, 7)) + ylim(c(-7,7)) +
+  ggtitle('MDS map - transformed basis')
+)
+```
+
+
+## After multiple attempts, here is a function that will solve for the transition matrix to move from the MDS-transformed basis back to the standard basis.
+
+--> Ultimately, I'm doing this using MLE with an L2 loss function, instead of solving directly using matrix algebra. 
+--> Later when we test data sets where the distance matrix is sparse, censored, or imperfectly measured, the MLE approach will still find the "best" transformation, even if there is no exact solution, whereas the matrix algebra approach would choke.
+
+
+```{r}
+## Solve for the basis transform
+solve_for_transition_to_standard_basis <- function(mds_map, original_coords){
+  loss_function <- function(pars, mds_map, original_coords){
+    v1 = pars['v1']
+    v2 = pars['v2']
+    u1 = pars['u1']
+    u2 = pars['u2']
+    
+    Cprime = t(mds_map$points)
+    C = t(original_coords)
+    
+    transition_matrix = matrix(c(v1, v2, u1, u2), 2, 2)
+    
+    sqrt(sum(((transition_matrix %*% Cprime)-C)^2))
+  }
+  
+  optim(par = c(v1 = 1, v2 = 2, u1 = 1, u2 = 2), fn = loss_function, mds_map = mds_map, original_coords = original_coords)
+}
+```
+
+```{r}
+## Transform to standard basis
+transform_to_standard_basis <- function(mds_map, original_coords){
+  original_coords = as.matrix(original_coords)
+  transition_coords <- solve_for_transition_to_standard_basis(mds_map, original_coords)
+  transition_matrix <- matrix(transition_coords$par, 2, 2)
+  transition_matrix %*% t(mds_map$points) %>%
+    t() %>%
+    as.tibble() %>%
+    # Vertical and horizontal shift to re-center
+    mutate(V1 = V1 - mean(V1) + mean(original_coords[,1]),
+           V2 = V2 - mean(V2) + mean(original_coords[,2])) %>%
+    set_names(paste0('mds_standardized', 1:2)) %>%
+    mutate(id = 1:n())
+}
+```
+
+
+--> Ok, now we have our exact solution back.
+
+```{r}
+## Plot
+cowplot::plot_grid(
+  coords %>%
+    merge(transform_to_standard_basis(mds_map, coords %>% select(starts_with('c')))) %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2)) +
+  geom_text(aes(x = mds_standardized1, y = mds_standardized2, label = id), color = 'blue') +
+  xlim(c(-7,7)) + ylim(c(-7,7)) +
+  ggtitle('Actual coordinates (black)\nStandardized mds (blue)'),
+as.tibble(mds_map$points) %>%
+  set_names(c('mds1', 'mds2')) %>%
+  mutate(id = 1:n()) %>%
+  ggplot() +
+  geom_text(aes(x = mds1, y = mds2, label = id), color = 'blue') +
+  xlim(c(-7, 7)) + ylim(c(-7,7)) +
+  ggtitle('Raw MDS map \n (nonstandard basis)')
+)
+```
+
+## Let's put this all into a function that can input a true map and a distance matrix, and output the above plot, and the mds transformation
+```{r}
+test_mds <- function(distances, 
+                     true_coords, 
+                     ndim,
+                     plot_title = NA){
+  true_corrds <- as.matrix(true_coords)
+  stopifnot(ncol(true_coords) == ndim) ## Check that the coordinate matrix and distances are of the proper dimension and orientataion
+  stopifnot(all(dim(distances) == ncol(true_coords)))
+  colnames(true_coords) <- paste0('actual', 1:ndim)
+  mds_coords = mds_map$points
+  colnames(mds_coords) = paste0('mds_raw', 1:ndim)
+  ## Infer the map
+  mds_map <- cmdscale(distances, k = ndim, add = T, eig = T, x.ret = T) 
+  ## Transform the map
+  
+ mds_df <- transform_to_standard_basis(mds_map, true_coords) %>%
+    ## Merge with the true coordinates, the inferred coordinates, and the transformed mds coordinates
+    cbind(true_coords) %>%
+    cbind(mds_coords) %>%
+    select(allele, starts_with('actual'), starts_with('transformed'), starts_with('mds'))
+    
+## Plot    
+  plot_out <- mds_df %>%
+    pivot_longer(-allele, names_to = c('kind', 'coordinate'), names_pattern = '(\\w+)(\\d)$') %>%
+    pivot_wider(id_cols = c(allele, kind), names_from = coordinate, values_from = value, names_prefix = 'c') %>%
+    mutate(grid_panel = ifelse(kind == 'mds_raw', 2, 1),
+           point_size = ifelse(kind == 'actual', 2, 1)) %>%
+  ggplot() +
+    geom_text(aes(x = c1, y = c2, label = allele, color = kind, size = point_size))+
+    facet_grid(.~grid_panel, labeller = labeller(grid_panel = c('1' = 'True map &\nMDS in standard basis', '2' = 'Raw MDS'))) +
+    scale_size(range = c(4,5), guide = 'none') +
+    ggtitle(plot_title)
+  
+ return(list(df = mds_df, plot = plot_out))
+}
+```
+
+
+
+
+## 2. STRESS TEST MDS
+
+* Measurement error
+
+### 2.1 Measurement error
+
+```{r}
+test_mds(distances = dist(true_coords + rnorm(length(true_coords), sd = 1)), 
+         true_coords,
+         ndim = 2,
+         'Gaussian measurement error, sd = 1')
+```
+
+```{r}
+test_mds(distances = dist(true_coords + rnorm(length(true_coords), sd = 2)), 
+         true_coords,
+         ndim = 2,
+         'Gaussian measurement error, sd = 2')
+```
+
+```{r}
+test_mds(distances = dist(true_coords + rnorm(length(true_coords), sd = 5)), 
+         true_coords,
+         ndim = 2,
+         'Gaussian measurement error, sd = 5')
+```
+
+```{r}
+test_mds(distances = dist(true_coords + rexp(length(true_coords))), 
+         true_coords,
+         ndim = 2,
+         'Exponential measurement error')
+```
