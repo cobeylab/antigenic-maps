@@ -89,7 +89,7 @@ fit_stan_MDS <- function(
 ```
 
 ```{r}
-fits <- fit_stan_MDS(observed_distances = observed_distmat, n_antigens = 5, n_sera = 5, n_dim = 2, sigma = 0.1, chains = 2)
+fits <- fit_stan_MDS(observed_distances = observed_distmat, n_antigens = 5, n_sera = 5, n_dim = 2, chains = 2)
 ```
 
 ```{r}
