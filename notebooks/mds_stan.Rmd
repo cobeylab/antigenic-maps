@@ -39,10 +39,12 @@ observed_distmat
 
 ## Infer map using basic stan model
 
+
+To get this working, let's initalize using the exact solution 
 ```{r}
   initfun <- function(){
     list(sigma = 1,
-         strain_coords = (coords %>% filter(kind == 'antigen') %>% select(starts_with('c')) %>% as.matrix)[-1,],
+         strain_coords = (coords %>% filter(kind == 'antigen') %>% select(starts_with('c')) %>% as.matrix),
          serum_coords = (coords %>% filter(kind == 'serum') %>% select(starts_with('c')) %>% as.matrix)
          )
     }
@@ -67,7 +69,7 @@ fit_stan_MDS <- function(
   stopifnot(ncol(observed_distances) == n_sera)
   stopifnot(length(first_strain_coords)==n_dim)
   
-  model <- stan_model('MDS.stan')
+  model <- stan_model('../MDS.stan')
   
   model_input_data <- list(
     n_strains = n_antigens,
@@ -80,8 +82,8 @@ fit_stan_MDS <- function(
   fit <- sampling(
     model, model_input_data, chains = chains, cores = cores, init = initfun,
     iter = 5000,
-    # control = list(adapt_delta = 0.3,
-    #                max_treedepth = 20),
+    control = list(adapt_delta = 0.95,
+                    max_treedepth = 13),
     ...
   )
 }
