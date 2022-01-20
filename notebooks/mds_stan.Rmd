@@ -43,7 +43,7 @@ observed_distmat
 To get this working, let's initalize using the exact solution 
 ```{r}
   initfun <- function(){
-    list(sigma = 1,
+    list(sigma = .05,
          strain_coords = (coords %>% filter(kind == 'antigen') %>% select(starts_with('c')) %>% as.matrix),
          serum_coords = (coords %>% filter(kind == 'serum') %>% select(starts_with('c')) %>% as.matrix)
          )
@@ -58,7 +58,6 @@ fit_stan_MDS <- function(
   n_antigens,
   n_sera,
   n_dim,
-  sigma = 0.05,
   chains = 3, # Number of MCMC chains to run
   cores = parallel::detectCores(logical = F),
   ...
@@ -74,8 +73,7 @@ fit_stan_MDS <- function(
     n_strains = n_antigens,
     n_sera = n_sera,
     n_dim = n_dim,
-    observed_distances = observed_distances,
-    sigma = sigma
+    observed_distances = observed_distances
   )
   
   fit <- sampling(
