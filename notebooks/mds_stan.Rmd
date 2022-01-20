@@ -58,7 +58,7 @@ fit_stan_MDS <- function(
   n_antigens,
   n_sera,
   n_dim,
-  first_strain_coords,
+  sigma = 0.05,
   chains = 3, # Number of MCMC chains to run
   cores = parallel::detectCores(logical = F),
   ...
@@ -67,7 +67,6 @@ fit_stan_MDS <- function(
   
   stopifnot(nrow(observed_distances) == n_antigens)
   stopifnot(ncol(observed_distances) == n_sera)
-  stopifnot(length(first_strain_coords)==n_dim)
   
   model <- stan_model('../MDS.stan')
   
@@ -76,13 +75,14 @@ fit_stan_MDS <- function(
     n_sera = n_sera,
     n_dim = n_dim,
     observed_distances = observed_distances,
-    first_strain_coords = first_strain_coords
+    sigma = sigma
   )
   
   fit <- sampling(
-    model, model_input_data, chains = chains, cores = cores, init = initfun,
+    model, model_input_data, chains = chains, cores = cores, 
+    init = initfun,
     iter = 5000,
-    control = list(adapt_delta = 0.95,
+    control = list(adapt_delta = 0.8,
                     max_treedepth = 13),
     ...
   )
@@ -91,7 +91,7 @@ fit_stan_MDS <- function(
 ```
 
 ```{r}
-fits <- fit_stan_MDS(observed_distances = observed_distmat, n_antigens = 5, n_sera = 5, n_dim = 2, first_strain_coords = c(0,0), chains = 1)
+fits <- fit_stan_MDS(observed_distances = observed_distmat, n_antigens = 5, n_sera = 5, n_dim = 2, sigma = 0.1, chains = 2)
 ```
 
 ```{r}
