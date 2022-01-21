@@ -1,0 +1,248 @@
+---
+title: "Bayesian MDS in Stan"
+output: html_notebook
+---
+
+Tryfixing one point to resolve the tranformation issue.
+
+```{r}
+generate_alleles <- function(ndim, nalleles, range = 10){
+  # Randomly draw coordinates in each dimension
+  sapply(1:ndim, function(dim){runif(nalleles, -range/2, range)}) %>%
+    as.tibble() %>%
+    set_names(paste0('c', 1:ndim)) %>%
+    # Assign allele ids
+    mutate(id = 1:nalleles)
+}
+```
+
+```{r}
+## Generate coordinates for a separate set of antigens (Ag) and sera (Ab)
+ab_df <- generate_alleles(2, 5)
+ag_df <- generate_alleles(2, 5)
+
+ab_coords <- as.matrix(ab_df %>% select(starts_with('c')))
+ag_coords <- as.matrix(ag_df %>% select(starts_with('c')))
+
+ag_ab_df<- bind_rows(list('ag' = ag_df,
+               'ab' = ab_df),
+          .id = 'kind') %>%
+  select(kind, id, starts_with('c'))
+
+true_plot <- ag_ab_df %>%
+  ggplot(aes(x = c1, y = c2, color = kind)) +
+  geom_text(aes(label = id))
+
+true_plot
+```
+
+```{r}
+get_l2_distance<- function(v1, v2){
+  stopifnot(length(v1) == length(v2))
+  sqrt(sum((v1-v2)^2))
+}
+
+## Calculate the distance matrix
+get_distances <- function(ab_coords, ag_coords){
+  distmat = matrix(NA, nrow = nrow(ag_coords), ncol = nrow(ab_coords))
+  rownames(distmat) = paste0('ag', 1:nrow(ag_coords))
+  colnames(distmat) = paste0('ab', 1:nrow(ab_coords))
+  for(ab in 1:nrow(ab_coords)){
+    for(ag in 1:nrow(ag_coords)){
+      distmat[ag, ab] = get_l2_distance(ab_coords[ab,], ag_coords[ag,])
+    }
+  }
+  distmat
+}
+```
+
+```{r}
+observed_distances = get_distances(ab_coords, ag_coords)
+
+## Test
+# sqrt(sum((ab_coords[3,]-ag_coords[5,])^2)) == observed_distances[5,3]
+# sqrt(sum((ab_coords[1,]-ag_coords[1,])^2)) == observed_distances[1,1]
+# sqrt(sum((ab_coords[2,]-ag_coords[5,])^2)) == observed_distances[5,2]
+# sqrt(sum((ab_coords[2,]-ag_coords[4,])^2)) == observed_distances[4,2]
+# sqrt(sum((ab_coords[2,]-ag_coords[3,])^2)) == observed_distances[3,2]
+```
+
+
+```{r}
+fit_MDS_MLE_fix1 <- function(
+  observed_distances, # vector of delay for each individual in the data
+  n_antigens,
+  n_sera,
+  n_dim,
+  ag_1_coords
+) {
+
+  stopifnot(nrow(observed_distances) == n_antigens)
+  stopifnot(ncol(observed_distances) == n_sera)
+  
+  loss_function <- function(pars, observed_distances, n_antigens, n_sera, n_dim){
+    stopifnot(length(pars) == ((n_antigens-1)+n_sera)*n_dim)
+    
+    estimated_ag_coords <- rbind(ag_1_coords, matrix(pars[1:((n_antigens-1)*n_dim)], n_antigens-1, n_dim)) %>% as.matrix()
+    estimated_ab_coords <- matrix(pars[((n_antigens-1)*n_dim+1):length(pars)], n_sera, n_dim)
+    
+    estimated_distances <- get_distances(estimated_ab_coords, estimated_ag_coords)
+    sum((observed_distances - estimated_distances)^2)
+  }
+
+  generate_initial_guess <- function(n_antigens, n_sera, n_dim){
+    ag_c1s <- runif(n_antigens-1, -10, 10); names(ag_c1s) = paste0('ag', 2:n_antigens, 'c1')
+    ag_c2s <- runif(n_antigens-1, -10, 10); names(ag_c2s) = paste0('ag', 2:n_antigens, 'c2')
+    ab_c1s <- runif(n_sera, -10, 10); names(ab_c1s) = paste0('ab', 1:n_sera, 'c1')
+    ab_c2s <- runif(n_sera, -10, 10); names(ab_c2s) = paste0('ab', 1:n_sera, 'c2')
+    
+    c(ag_c1s, ag_c2s, ab_c1s, ab_c2s)
+  }
+  
+  ## Repeat the fit 5 times from different initial values to verify convergence
+  
+  fit_list <- lapply(1:10, function(x) { optim(par = generate_initial_guess(n_antigens, n_sera, n_dim),
+                                             fn = loss_function,
+                                             observed_distances = observed_distances,
+                                             n_antigens = n_antigens, 
+                                             n_sera = n_sera,
+                                             n_dim = n_dim,
+                                             method = 'CG',
+                                             control = list(maxit = 500))}
+  )
+  ## Check convergence
+  if(!all(sapply(fit_list, function(ll) ll$convergence) == 0)){
+    warning('Not all optimizations converged! - Check individual fits')
+  }
+  ## Check that if all runs converged, that they all converged to the same solution
+  errfun_value <- sapply(fit_list, function(ll) ll$value)
+  if(!all(abs(errfun_value - mean(errfun_value) < .5))){warning('Not all runs converged to the same solution. Check individual fits.')}
+  
+  return(list(best_fit = fit_list[errfun_value == min(errfun_value)][[1]],
+              all_fits = fit_list))
+}
+
+```
+
+```{r}
+fits <- fit_MDS_MLE_fix1(observed_distances = observed_distances, n_antigens = 5, n_sera = 5, n_dim = 2, ag_1_coords= ag_coords[1,])
+fits
+```
+## Visualize the difference between fits
+```{r}
+get_fits_df <- function(fit_obj){
+  tibble(coordinate = fit_obj$par,
+       label = names(fit_obj$par)) %>%
+  tidyr::extract(label, into = c('kind','id', 'dim'), regex = '(a\\w)(\\d)c(\\d)', convert = T) %>%
+  pivot_wider(names_from = dim, values_from = coordinate, names_prefix = 'c') %>%
+  bind_rows(ag_df[1,] %>% mutate(kind = 'ag'))
+}
+```
+
+
+Plot the solutions from each run.
+
+Note that the runs with near-0 errfun all have very similar topology, whereas the higher-errfun solutions seem like a local min solution
+```{r}
+all_fits_df <- lapply(fits$all_fits, function(ll){ 
+  get_fits_df(ll) %>%
+  mutate(errfun = ll$value,
+         convergence = ll$convergence) }) %>%
+  bind_rows(.id = 'fit')
+```
+
+```{r}
+all_fits_df %>%
+  mutate(kind = ifelse(kind == 'ag' & id == 1, 'fixed', kind)) %>%
+  ggplot()+
+  geom_point(aes(x = c1, y = c2, shape = kind, color = errfun)) +
+  facet_wrap(.~fit)
+```
+
+
+## Compare errorfunctions
+```{r}
+tibble(fit = 1:10,
+       value = sapply(fits$all_fits, function(ll) ll$value)
+) %>%
+  ggplot() +
+  geom_histogram(aes(x = value), bins = 100)
+```
+
+## Plot
+The mds is an isometry of the true coordinates
+```{r}
+fits_df <- get_fits_df(fits$best_fit) %>%
+  arrange(kind, id)
+
+mds_plot <- fits_df %>%
+  ggplot(aes(x = c1, y = c2, color = kind))+
+  geom_text(aes(label = id))
+
+cowplot::plot_grid(
+  true_plot+ggtitle('truth'),
+  mds_plot+ggtitle('mds'))
+```
+
+
+## We should be able to reflect and rotate the solutions to obtain a good comparison to the original
+```{r}
+align_mds_with_original <- function(mds_df, original_df){
+  mds_coords = all_fits_df %>% dplyr::filter(fit == '2') %>% arrange(desc(kind), id) %>% select(starts_with('c')) %>% select(-convergence) %>% as.matrix()
+  original_coords = original_df %>% arrange(desc(kind), id) %>% select(starts_with('c')) %>% as.matrix()
+  
+  ## Shift so that the ag1 coordinate is at the origin for both maps
+  shifted_mds = apply(mds_coords, 2, function(vv) vv-vv[1])
+  shifted_original = apply(original_coords, 2, function(vv) vv-vv[1])
+
+  ## Get the angles between corresponding coordinates in each map
+  get_cosine <- function(v1, v2){
+    dot_prod = sum(v1*v2) # dot product
+    mag_v1 = sqrt(sum(v1^2))
+    mag_v2 = sqrt(sum(v2^2))
+    cos_theta = dot_prod/(mag_v1*mag_v2)
+    theta = acos(cos_theta)
+    theta
+  }
+  
+  angle_original_to_mds = sapply(2:nrow(shifted_original), function(ii) get_cosine(shifted_original[ii,], shifted_mds[ii,]))
+  ## If all the angles are equal, then the mds map is a rotation of the original
+  ## If the angles are different, then the mds map is a reflection and a rotation
+  if(!all( abs(angle_original_to_mds - mean(angle_original_to_mds)) < .1 )){
+    ## Reflect across a vertical axis
+    shifted_mds[,1] = shifted_mds[,1] - min(shifted_mds[,1]) # Shift so that all points are non-negative on the x-axis
+    reflected_mds = t(matrix(c(-1, 0, 0, 1), 2, 2) %*% t(shifted_mds)) # Reflect across the y-axis
+    shifted_mds = apply(reflected_mds, 2, function(vv) vv-vv[1]) # Re-shift the ag 1 point to the origin
+    angle_original_to_mds = sapply(2:nrow(shifted_original), function(ii) get_cosine(shifted_original[ii,], shifted_mds[ii,])) ## Recalculate angles
+    stopifnot(all( abs(angle_original_to_mds - mean(angle_original_to_mds)) < .1 )) ## Break if the reflection was not successful
+  }
+  
+  ## Rotate to align with the original
+  theta = 2*pi - mean(angle_original_to_mds) # Get the angle
+  V = matrix(c(cos(theta), sin(theta), -sin(theta), cos(theta)), nrow = 2, ncol = 2) # Get the rotation matrix
+  rotated_mds = t(V %*% t(shifted_mds)) # Rotate by theta
+  
+  ## Shift to align with the original and return
+  aligned_mds = sapply(1:ncol(rotated_mds), function(cc) rotated_mds[,cc] - rotated_mds[1,cc] +  original_coords[1,cc]) 
+  original_df %>%
+    mutate(mds1 = mds_coords[,1],
+           mds2 = mds_coords[,2],
+           aligned_mds1 = aligned_mds[,1],
+           aligned_mds2 = aligned_mds[,2])
+}
+```
+
+
+## ALign mds with original coords
+```{r}
+check_mds <- align_mds_with_original(mds_df = fits_df,
+                        original_df = ag_ab_df) 
+
+check_mds %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2), pch = 16) +
+  geom_point(aes(x = aligned_mds1, y = aligned_mds2, color = kind), pch = 9)
+
+```
+
+## It works!
