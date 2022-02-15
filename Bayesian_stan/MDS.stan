@@ -9,7 +9,7 @@ parameters {
   // Note: ag1 coords are all 0 (ag1 falls at the origin)
   //       ag1 coord 1 is free. Ag2 coords 2, 3, etc. are 0 (ag2 is on the x-axis).
   real<lower=0> sigma; // sd of normal density around observed distances
-  real ag2_c1; // x coordinate of antigen 2
+  real<lower=0> ag2_c1; // x coordinate of antigen 2
   vector[n_dim] antigen_coords[n_antigens-2]; // Array of vectors, one for each strain, and each containing n_dim coords
   vector[n_dim] serum_coords[n_sera];
 }

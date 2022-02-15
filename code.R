@@ -5,6 +5,10 @@ filter <- dplyr::filter
 select <- dplyr::select
 extract <- tidyr::extract
 
+zeroish <- function(x){
+  abs(x) <= .Machine$double.eps^.5
+}
+
 ndim <- function(xx){
   ldim <- length(dim(xx)) ## Unlike dim, will print 0 if a vector
   if(ldim >= 2){
@@ -34,7 +38,11 @@ generate_map_coordinates <- function(n_dim, # Dimensions in Euclidean space
                   dimnames = list(NULL, paste0('c', 1:n_dim))) %>%
     as.tibble()
   ## Bind into a tibble with id columns and return
-  tibble(id = c(1:n_antigens, 1:n_sera),
+  id_names = c(
+    if(n_antigens < 1) NULL else 1:n_antigens,
+    if(n_sera < 1) NULL else 1:n_sera
+  )
+  tibble(id = id_names,
          kind = rep(c('antigen', 'serum'), c(n_antigens, n_sera))) %>%
     bind_cols(coords)
 }
@@ -201,7 +209,7 @@ align_mds_with_original <- function(mds_coords, # Nxd matrix containing all ag a
   
   ## Shift so that the ag1 coordinate is at the origin for both maps
   shifted_mds = shift_to_origin(mds_coords)
-  hg = shift_to_origin(original_coords)
+  shifted_original = shift_to_origin(original_coords)
   
   angle_original_to_mds = sapply(2:nrow(shifted_original), function(ii) get_cosine(shifted_original[ii,], shifted_mds[ii,]))
   ## If all the angles are equal, then the mds map is a rotation of the original
@@ -257,7 +265,7 @@ get_fits_df <- function(fit_obj){
 ##   2. ag2 coordinates fall on the x-axis
 standardize_coordinates <- function(coord_mat, 
                                     ag1_row = 1,
-                                    ag2_row = 2
+                                    ag2_row = 2,
 ){
   n_dim = ncol(coord_mat) 
   stopifnot(nrow(coord_mat) >= n_dim)

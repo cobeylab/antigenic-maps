@@ -37,6 +37,7 @@ source('../code.R')
 n_antigens = 5
 n_sera = 6
 n_dim = 2
+n_chains = 4
 ```
 
 ## Draw coordinates
@@ -90,7 +91,7 @@ To get this working, let's initalize using the exact solution
 ```{r}
   initfun <- function(){
     list(sigma = .05,
-         ag2_c1 = runif(1, -10, 10),
+         ag2_c1 = runif(1, 0, 10),
          strain_coords = matrix(runif((n_antigens-2)*n_dim, -10, 10), n_antigens-2, n_dim),
          serum_coords =  matrix(runif(n_sera*n_dim, -10, 10), n_sera, n_dim)
          )
@@ -128,8 +129,8 @@ fit_stan_MDS <- function(
     model, model_input_data, chains = chains, cores = cores, 
     init = initfun,
     iter = 5000,
-  #  control = list(adapt_delta = 0.8,
-  #                  max_treedepth = 13),
+    control = list(adapt_delta = 0.89,
+                    max_treedepth = 14),
     ...
   )
 }
@@ -141,7 +142,7 @@ fits <- fit_stan_MDS(observed_distances = distmat,
                      n_antigens = n_antigens, 
                      n_sera = n_sera, 
                      n_dim = n_dim, 
-                     chains = 3)
+                     chains = n_chains)
 ```
 
 ## Visualize trace plots
@@ -161,7 +162,7 @@ raw_fits <- rstan::extract(fits)
 long_antigen_coords <- lapply(1:(n_antigens-2), function(ll) raw_fits$antigen_coords[,ll,] %>%
                                                       magrittr::set_colnames(c('c1', 'c2')) %>%
                            as.tibble() %>%
-                           mutate(chain = rep(1:3, each = 2500),
+                           mutate(chain = rep(1:n_chains, each = 2500),
                                   id = ll+2,
                                   iter = 1:nrow(.),
                                   kind = 'antigen')) %>%
@@ -170,13 +171,13 @@ long_antigen_coords <- lapply(1:(n_antigens-2), function(ll) raw_fits$antigen_co
 long_serum_coords <- lapply(1:n_sera, function(ll) raw_fits$serum_coords[,ll,] %>%
                                                       magrittr::set_colnames(c('c1', 'c2')) %>%
                            as.tibble() %>%
-                           mutate(chain = rep(1:3, each = 2500),
+                           mutate(chain = rep(1:n_chains, each = 2500),
                                   id = ll,
                                   iter = 1:nrow(.),
                                   kind = 'serum')) %>%
                     bind_rows()
 
-ag2_summary <- tibble(id = 2, kind = 'ag2', chain = rep(1:3, each = 2500), c1 = raw_fits$ag2_c1) %>%
+ag2_summary <- tibble(id = 2, kind = 'ag2', chain = rep(1:n_chains, each = 2500), c1 = raw_fits$ag2_c1) %>%
   group_by(id, kind, chain) %>%
   summarise(c1.10 = quantile(c1, .1),
             c1 = median(c1),
@@ -233,4 +234,4 @@ distmat
 ```
 
 
-## Ok, this is working, but I think it makes sense to fix the first ag coordinate, and the direction of vec(ag_1, ag_2) so that we don't have to wory about the isometry issue so much.
+## This is working much better
