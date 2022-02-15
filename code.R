@@ -265,7 +265,7 @@ get_fits_df <- function(fit_obj){
 ##   2. ag2 coordinates fall on the x-axis
 standardize_coordinates <- function(coord_mat, 
                                     ag1_row = 1,
-                                    ag2_row = 2,
+                                    ag2_row = 2
 ){
   n_dim = ncol(coord_mat) 
   stopifnot(nrow(coord_mat) >= n_dim)
