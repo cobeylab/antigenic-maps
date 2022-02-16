@@ -293,26 +293,105 @@ infer_titer_map <- function(antigen_coords, # Data frame of ag coords
                        chains = n_chains,
                        niter = n_iter)
   
-  plot_fits(fits = fits,
-            n_iter = n_iter,
-            outdir = plotdir)
   
   
-  return(list(ag_ab_df = merged_df,
+  return(list(ag_ab_coords = merged_df,
               titer_map = titer_map,
+              summary_inferred_coords = summary_coords,
               stan_fits = fits))
 }
 
 
 
 
-plot_fits <- function(fits, 
+plot_fits <- function(antigen_coords,
+                      fits, 
                       n_iter,
                       outdir){
   trplot <- rstan::traceplot(fits, pars = names(fits))
   
+  contour_posteriors <- extract_long_coords(fits) %>% 
+    filter(iter %% 5 == 0) %>% ## THIN
+    ggplot()+
+    geom_density_2d(aes(x = c1, y = c2, color = factor(chain))) +
+    facet_grid(kind ~ id)
   
-  raw_fits <- rstan::extract(fits)
+  epitope_strain_map <- plot_inferred_original_map(antigen_coords, 
+                                                   fits)
+  
+  outdir = paste0(Sys.Date(), '/', outdir)
+  if(!dir.exists(paste0(Sys.Date()))) dir.create(paste0(Sys.Date()))
+  if(!dir.exists(outdir))  dir.create(outdir)
+  ggsave(paste0(outdir, '/traceplot.png'), plot = trplot)
+  ggsave(paste0(outdir, '/epitope_strain_map.png'), plot = epitope_strain_map)
+  ggsave(paste0(outdir, '/contour_posteriors.png'), plot = contour_posteriors)
+  
+  ## pairs plots
+  png(paste0(outdir, '/antigen_pairs.png'))
+  pairs(fits, pars = names(fits)[grepl(names(fits), pattern = 'antigen.+')])
+  dev.off()
+  png(paste0(outdir, '/serum_pairs.png'))
+  pairs(fits, pars = names(fits)[grepl(names(fits), pattern = 'serum.+')])
+  dev.off()
+  png(paste0(outdir, '/other_pairs.png'))
+  pairs(fits, pars = names(fits)[!grepl(names(fits), pattern = 'antigen.+') & !grepl(names(fits), pattern = 'serum.+')])
+  dev.off()
+  
+  
+  cat(sprintf('plots saved in %s', outdir))
+  return(epitope_strain_map)
+}
+
+
+plot_antigen_coords <- function(antigen_coords){
+  antigen_coords %>%
+    ggplot() +
+    geom_line(aes(x=c1, y = c2, group = epitope), lty = 2, lwd = .1)+
+    geom_point(aes(x = c1, y = c2, shape = antigen, color = epitope))+
+    facet_wrap(.~epitope, labeller = label_both)
+}
+
+
+plot_Ab_Ag_map <- function(ab_ag_df){
+  ab_ag_df %>%
+    ggplot() +
+    geom_point(aes(x = c1_Ab, y = c2_Ab, color = epitope), pch = 3) +
+    geom_point(aes(x = c1_Ag, y = c2_Ag, fill = epitope), pch = 21) +
+  #  geom_point(aes(x = c1, y = c2, fill = epitope), data = antigen_coords, pch = 22) +
+    guides(color=guide_legend(title="Abs to epitope"))+
+    xlab('c1')+
+    ylab('c2')
+}
+
+plot_inferred_original_map <- function(antigen_coords,
+                                       stan_fit){
+
+  
+  reformatted_df <- antigen_coords %>%
+    mutate(kind = paste0('E', epitope)) %>%
+    rename(allele = antigen) %>%
+    select(allele, kind, starts_with('c')) %>%
+    mutate(kind = factor(kind, levels = c('antigen', 'serum', 'fixed_ag1', 'E1', 'E2', 'E3'),
+                         labels = c('antigen (estimated)', 'serum (estimated)', 'antigen 1 position (fixed)', 'epitope 1 (truth)', 'epitope 2 (truth)', 'epitope 3 (truth)')), ordered = T)
+  
+  epitope_strain_map <- extract_summary_coords(stan_fit) %>%
+    mutate(allele = as.factor(id)) %>%
+    mutate(kind = factor(kind, levels = c('antigen', 'serum', 'fixed_ag1', 'E1', 'E2', 'E3'),
+                         labels = c('antigen (estimated)', 'serum (estimated)', 'antigen 1 position (fixed)', 'epitope 1 (truth)', 'epitope 2 (truth)', 'epitope 3 (truth)')), ordered = T) %>%
+    ggplot() +
+    geom_point(aes(x = c1, y = c2, shape = kind), data = reformatted_df) +
+    geom_polygon(aes(x = c1, y = c2, fill = allele), data = reformatted_df, alpha = .2)+
+    geom_point(aes(x = c1, y = c2, shape = kind, color = allele)) +
+    facet_grid(allele~chain, labeller = label_both) +
+    scale_shape_manual(values = c(4, 14, 21, 22, 23, 3))
+  
+  epitope_strain_map
+}
+
+
+
+extract_long_coords <- function(stan_fit){
+  raw_fits <- rstan::extract(stan_fit)
   
   long_antigen_coords <- lapply(1:(n_ag-2), function(ll) raw_fits$antigen_coords[,ll,] %>%
                                   magrittr::set_colnames(c('c1', 'c2')) %>%
@@ -337,75 +416,42 @@ plot_fits <- function(fits,
   long_coords <- bind_rows(long_antigen_coords,
                            long_serum_coords,
                            ag2_long)
+  long_coords
+}
+
   
-  
-  ag2_summary = ag2_long %>%
-    group_by(id, kind, chain) %>%
-    summarise(c1.10 = quantile(c1, .1),
-              c1 = median(c1),
-              c1.90 = quantile(c1, .9)) %>%
-    mutate(c2.10 = NA, c2 = 0, c2.90 = NA)
-  
-  summary_coords <- bind_rows(long_antigen_coords,
-                              long_serum_coords) %>%
+extract_summary_coords <- function(stan_fit){
+  summary_coords <- extract_long_coords(stan_fit) %>%
     group_by(id, kind, chain) %>%
     summarise(c1.10 = quantile(c1, .1),
               c1 = median(c1),
               c1.90 = quantile(c1, .9),
-              c2.10 = quantile(c2, .1),
-              c2 = median(c2),
-              c2.90 = quantile(c2, .9)) %>%
+              c2.10 = quantile(c2, .1, na.rm = T),
+              c2 = median(c2, na.rm = T),
+              c2.90 = quantile(c2, .9, na.rm = T)) %>%
     ungroup() %>%
     bind_rows(tibble(id = 1,
-                     kind = 'fixed_ag1', chain = 1:3, c1.10 = NA, c1 = 0, c1.90 = NA, c2.10 = NA, c2 = 0, c2.90 = NA)) %>%
-    bind_rows(ag2_summary)
-  
-  contour_posteriors <- long_coords %>% 
-    filter(iter %% 5 == 0) %>% ## THIN
-    ggplot()+
-    geom_density_2d(aes(x = c1, y = c2, color = factor(chain))) +
-    facet_grid(kind ~ id)
-  
-  reformatted_df <- antigen_coords %>%
-    mutate(kind = paste0('E', epitope)) %>%
-    rename(id = antigen) %>%
-    select(id, kind, starts_with('c'))
-  
-  epitope_strain_map <- summary_coords %>%
-    mutate(id = as.factor(id)) %>%
-    ggplot() +
-    geom_point(aes(x = c1, y = c2, shape = kind, color = id), data = reformatted_df) +
-    geom_point(aes(x = c1, y = c2, shape = kind, fill = id)) +
-    facet_wrap(.~chain,  ncol = 2, nrow = 2) +
-    scale_shape_manual(values = c(21, 2, 3, 4, 17, 23))
-  
-  outdir = paste0(Sys.Date(), '/', outdir)
-  if(!dir.exists(paste0(Sys.Date()))) dir.create(paste0(Sys.Date()))
-  if(!dir.exists(outdir))  dir.create(outdir)
-  ggsave(paste0(outdir, '/traceplot.png'), plot = trplot)
-  ggsave(paste0(outdir, '/epitope_strain_map.png'), plot = epitope_strain_map)
-  ggsave(paste0(outdir, '/contour_posteriors.png'), plot = contour_posteriors)
-  
-  ## pairs plots
-  png(paste0(outdir, '/antigen_pairs.png'))
-  pairs(fits, pars = names(fits)[grepl(names(fits), pattern = 'antigen.+')])
-  dev.off()
-  png(paste0(outdir, '/serum_pairs.png'))
-  pairs(fits, pars = names(fits)[grepl(names(fits), pattern = 'serum.+')])
-  dev.off()
-  png(paste0(outdir, '/other_pairs.png'))
-  pairs(fits, pars = names(fits)[!grepl(names(fits), pattern = 'antigen.+') & !grepl(names(fits), pattern = 'serum.+')])
-  dev.off()
-  
-  
-  cat(sprintf('plots saved in %s', outdir))
+                     kind = 'fixed_ag1', chain = 1:3, c1.10 = NA, c1 = 0, c1.90 = NA, c2.10 = NA, c2 = 0, c2.90 = NA)) 
+  summary_coords
 }
 
 
-plot_antigen_coords <- function(antigen_coords){
-  antigen_coords %>%
-    ggplot() +
-    geom_line(aes(x=c1, y = c2, group = epitope), lty = 2, lwd = .1)+
-    geom_point(aes(x = c1, y = c2, shape = antigen, color = epitope))+
-    facet_wrap(.~epitope, labeller = label_both)
+flip_summary_over_x <- function(original_coords,
+                        inferred_summary){
+ flip.these.chains <-  merge(original_coords, 
+        inferred_summary %>%
+          filter(kind == 'antigen') %>%
+          rename(antigen = id),
+        by = 'antigen') %>%
+    group_by(chain) %>%
+    summarise(flip.me = sum((c2.x > 0) == (c2.y > 0)) < sum((c2.x > 0) == (-c2.y > 0)))
+ 
+ inferred_summary %>% 
+   merge(flip.these.chains) %>%
+   mutate(across(starts_with("c2"), negate))
+  
+}
+
+negate <- function(x){
+  -x
 }

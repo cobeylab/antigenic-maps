@@ -18,7 +18,11 @@ n_chains = 4
 n_iter = 5000 # half will be burn in
 ```
 
-## 0.1. Code runs when there's only one Ab per epitope?
+
+---------------------------------------------------------------
+
+
+## 0.1. Does code run when there's only one Ab per epitope?
 
 
 Generate ag coords
@@ -40,7 +44,7 @@ plot_antigen_coords(antigen_coords)
 ```
 
 Infer maps
-```{r}
+```{r, echo=F, include=F}
 oneAb_per_epitope <- infer_titer_map(antigen_coords = antigen_coords, relative_concentrations = c(1,1,1), n_epitopes = 3, n_antigens = 5, n_abs_per_serum = 3, plotdir = 'test_1Ab_per_epitope')
 ```
 Plot heatmap
@@ -56,12 +60,10 @@ Compare inferred distances to actual distances between epitopes
 
 ```
 
-
-
-## 0.2. Code runs where some epitopes have 0 immunodominance?
+---------------------------------------------------------------
 
 ```{r}
-
+## 0.2. Code runs where some epitopes have 0 immunodominance?
 ```
 
 
@@ -85,10 +87,7 @@ antigen_coords$c1 = shifted_coords$c1
 antigen_coords$c2 = shifted_coords$c2
 ```
 
-Plot ag coords
-```{r}
-plot_antigen_coords(antigen_coords)
-```
+
 Infer titer map
 ```{r echo=FALSE, include=FALSE}
 one_epitope_no_ab_jitter <- infer_titer_map(antigen_coords = antigen_coords, 
@@ -100,16 +99,26 @@ one_epitope_no_ab_jitter <- infer_titer_map(antigen_coords = antigen_coords,
 ```
 
 
+Plot ags and abs
+```{r}
+one_epitope_no_ab_jitter$ag_ab_df %>%
+ plot_Ab_Ag_map()
+  
+```
+
 
 
 View the inferred points.
 
 --> This looks good. The inferred points are an exact match, or a reflection about the x axis.
 
-![](2022-02-11/test01_one_epitope_no_ab_jitter/epitope_strain_map.png)
+```{r}
+one_epitope_no_ab_jitter$inferred_map_plot +
+  facet_wrap(.~chain)
+```
 
 
-
+---------------------------------------------------------------
 
 
 ## 2. If there's only one epitope and Abs are distributed around each, then we should recover the underlying map with minial error
@@ -125,12 +134,27 @@ one_epitope_no_ab_withjitter <- infer_titer_map(antigen_coords = antigen_coords,
 ```
 
 
+Plot ags and abs
+```{r}
+one_epitope_no_ab_withjitter$ag_ab_df %>%
+ plot_Ab_Ag_map() +
+facet_wrap(.~antigen, labeller = label_both)
+  
+```
+--> Abs are extremely jittered and sparse...
+
+
 View the inferred points.
 
 --> This looks good. The inferred points are an exact match, or a reflection about the x axis.
+```{r}
+one_epitope_no_ab_jitter$inferred_map_plot +
+  facet_wrap(.~chain)
+```
 
-![](2022-02-11/test02_one_epitope_no_ab_withjitter/epitope_strain_map.png)
 
+
+---------------------------------------------------------------
 
 ## 3. If there's multiple epitopes, but all Abs are specific to one, then we should reproduce the outputs of #2.
 
@@ -157,22 +181,36 @@ plot_antigen_coords(antigen_coords)
 ```
 
 Infer titer map
-```{r}
+```{r, echo=F, include=F}
 three_epitopes_e1dominant <- infer_titer_map(antigen_coords, 
                 relative_concentrations = c(3, 0, 0), 
                 n_epitopes = 3, 
                 n_antigens = 5, 
-                n_abs_per_serum = 10, 
+                n_abs_per_serum = 500, 
                 plotdir = 'test03_3epitopes_E1dominant', 
                 sigma = .1)
 ```
+
+
+Plot ags and abs
+```{r}
+three_epitopes_e1dominant$ag_ab_df %>%
+ plot_Ab_Ag_map() +
+facet_wrap(.~antigen, labeller = label_both)
+  
+```
+
 
 View the inferred points.
 
 Initially, when sigma was 1: I'm not sure why the inferred points don't exactly match the underlying E1 points. Let's dig in.
 After changing sigma to 0.1: Ok, this looks very sensible.
+When we increase the number of Abs to 500 this looks extra good.
 
-![](2022-02-11/test03_3epitopes_E1dominant/epitope_strain_map.png)
+```{r}
+three_epitopes_e1dominant$inferred_map_plot +
+  facet_wrap(.~chain)
+```
 When sigma =1, the Abs are too dispersed for accurate inference.
 I changed sigma=0.1 and now things look good.
 
@@ -183,7 +221,7 @@ three_epitopes_e1dominant$ag_ab_df %>%
   geom_point(aes(x = c1, y = c2, color = epitope), data = antigen_coords) +
   geom_point(aes(x = c1_Ab, y = c2_Ab, color = epitope), pch = 3)
 ```
-
+---------------------------------------------------------------
 
 
 
@@ -201,7 +239,7 @@ coords_one_mutates %>%
 
 
 
-```{r}
+```{r, echo=F, include=F}
 equally_immunodominant <- infer_titer_map(coords_one_mutates, 
                 relative_concentrations = c(1,1,1), 
                 n_epitopes = 3, 
@@ -211,7 +249,7 @@ equally_immunodominant <- infer_titer_map(coords_one_mutates,
                 sigma = .1)
 ```
 
-```{r}
+```{r, echo=F, include=F}
 skewed_immunodominance <- infer_titer_map(coords_one_mutates, 
                 relative_concentrations = c(1+2/3, 1, 1/3), 
                 n_epitopes = 3, 
@@ -222,7 +260,7 @@ skewed_immunodominance <- infer_titer_map(coords_one_mutates,
 ```
 
 
-```{r}
+```{r, echo=F, include=F}
 complete_immunodominance <- infer_titer_map(coords_one_mutates, 
                 relative_concentrations = c(3, 0, 0), 
                 n_epitopes = 3, 
@@ -232,6 +270,14 @@ complete_immunodominance <- infer_titer_map(coords_one_mutates,
                 sigma = .1)
 ```
 
+
+```{r}
+cowplot::plot_grid(equally_immunodominant$inferred_map_plot + ggtitle('even') + theme(legend.position = 'none') + facet_wrap(.~chain),
+                   skewed_immunodominance$inferred_map_plot + ggtitle('skewed') + theme(legend.position = 'none') + facet_wrap(.~chain),
+                   complete_immunodominance$inferred_map_plot+ ggtitle('all or nothing') + theme(legend.position = 'none') + facet_wrap(.~chain),
+                   cowplot::get_legend(equally_immunodominant$inferred_map_plot)
+                   )
+```
 
 
 

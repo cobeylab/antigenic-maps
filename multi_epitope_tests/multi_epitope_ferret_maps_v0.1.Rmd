@@ -126,19 +126,29 @@ E1_complete_immunodominance <- infer_titer_map(antigen_coords,
                 sigma = .1)
 ```
 
+```{r}
+even_immunodominance$inferred_map_plot + ggtitle('even') + theme(legend.position = 'none') + facet_grid(allele~chain, labeller = label_both)
+```
 
 
-
-![Even_immunodominance: The inferred distances are small relative to the actual epitope distances. D2 is not really used, but that may have to do with our antigen structure.](2022-02-14/even_immunodominance/epitope_strain_map.png)
-
-
-
-![Skewed immunodominance: Looks very similar to the even immunodominance situation.](2022-02-14/skewed_immunodominance/epitope_strain_map.png)
+```{r}
+skewed_immunodominance$inferred_map_plot + ggtitle('skewed') + theme(legend.position = 'none')  + facet_grid(allele~chain, labeller = label_both)
+```
 
 
+```{r}
+E1_complete_immunodominance$inferred_map_plot+ ggtitle('all or nothing') + theme(legend.position = 'none')  + facet_grid(allele~chain, labeller = label_both) 
 
-![E1 complete immunodominance: ](2022-02-14/all_or_nothing_immunodominance/epitope_strain_map.png)
 
+E1_complete_immunodominance$titer_map
+```
+
+
+```{r}
+cowplot::plot_grid(
+cowplot::get_legend(even_immunodominance$inferred_map_plot)
+)
+```
 
 
 
