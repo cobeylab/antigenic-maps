@@ -127,20 +127,32 @@ E1_complete_immunodominance <- infer_titer_map(antigen_coords,
 ```
 
 ```{r}
-even_immunodominance$inferred_map_plot + ggtitle('even') + theme(legend.position = 'none') + facet_grid(allele~chain, labeller = label_both)
+plot_inferred_original_map(antigen_coords,
+                           even_immunodominance$stan_fits,
+                           flip_these_chains_over_x = c(1,2)) + 
+  ggtitle('even') + 
+  theme(legend.position = 'none') + 
+  facet_grid(allele~chain, labeller = label_both)
 ```
 
 
 ```{r}
-skewed_immunodominance$inferred_map_plot + ggtitle('skewed') + theme(legend.position = 'none')  + facet_grid(allele~chain, labeller = label_both)
+plot_inferred_original_map(antigen_coords,
+                           skewed_immunodominance$stan_fits,
+                           flip_these_chains_over_x = NULL) +
+  ggtitle('skewed') + theme(legend.position = 'none')  + 
+  facet_grid(allele~chain, labeller = label_both)
 ```
 
 
 ```{r}
-E1_complete_immunodominance$inferred_map_plot+ ggtitle('all or nothing') + theme(legend.position = 'none')  + facet_grid(allele~chain, labeller = label_both) 
+plot_inferred_original_map(antigen_coords,
+                           E1_complete_immunodominance$stan_fits,
+                           flip_these_chains_over_x = 1:4) + 
+  ggtitle('all or nothing') + theme(legend.position = 'none')  + 
+  facet_grid(allele~chain, labeller = label_both) 
 
 
-E1_complete_immunodominance$titer_map
 ```
 
 
@@ -153,17 +165,10 @@ cowplot::get_legend(even_immunodominance$inferred_map_plot)
 
 
 ```{r}
-E1_complete_immunodominance$ag_ab_df %>%
+E1_complete_immunodominance$ag_ab_coords %>%
   ggplot() +
   geom_point(aes(x = c1_Ab, y = c2_Ab, color = epitope), pch = 3) +
     geom_point(aes(x = c1_Ag, y = c2_Ag, fill = epitope), pch = 21) +
     geom_point(aes(x = c1, y = c2, fill = epitope), data = antigen_coords, pch = 22) 
 ```
-
-
-
-## Something still isn't working right -- Why doesn't the E1 complete ID inferred map match the original?
-
---> In the test_code.Rmd notebook, I think we can recover the E1 coords exactly...
-Why not here?
 

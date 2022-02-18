@@ -311,3 +311,17 @@ standardize_coordinates <- function(coord_mat,
   }
   return(final_output)
 }
+
+standardize_coordinate_df<-function(coord_df,
+                                    ag1_row,
+                                    ag2_row){
+  # Get standarzied coords
+  standardized_matrix = standardize_coordinates(coord_mat = coord_df %>% select(matches('c\\d')) %>% as.matrix())
+  
+  # Replace the original coordinates in the data frame and return
+  colnames(standardized_matrix) = colnames(coord_df %>% select(matches('c\\d')))
+  coord_df %>%
+    select(-matches('c\\d')) %>%
+    bind_cols(as_tibble(standardized_matrix))
+  
+}
