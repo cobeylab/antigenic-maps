@@ -9,10 +9,10 @@ reset <- function(){
 }
 
 
-generate_ag_coords_randomwalk <- function(n_ag, n_epitopes){
+generate_ag_coords_randomwalk <- function(n_antigens, n_epitopes){
   lapply(1:n_epitopes, FUN = function(xx){
-    cvec = numeric(n_ag)
-    for(ii in 2:n_ag){
+    cvec = numeric(n_antigens)
+    for(ii in 2:n_antigens){
       cvec[ii] = cvec[ii-1] + rnorm(1, 2, 2)
     }
     return(cvec)
@@ -21,9 +21,9 @@ generate_ag_coords_randomwalk <- function(n_ag, n_epitopes){
     unlist()
 }
 
-generate_ag_coords_random <- function(n_ag, n_epitopes){
+generate_ag_coords_random <- function(n_antigens, n_epitopes){
   lapply(1:n_epitopes, FUN = function(xx){
-    cvec = runif(n_ag, 0, 10)
+    cvec = runif(n_antigens, 0, 10)
   }
   ) %>%
     unlist()
@@ -32,7 +32,7 @@ generate_ag_coords_random <- function(n_ag, n_epitopes){
 
 
 ## Generate a population of Abs specific to a set of native coordinates
-generate_ferret_repertoire <- function(native_epitope_coords, ## A data frame with columns for epitope, strain id, and each coordinate
+generate_gaussian_repertoire <- function(native_epitope_coords, ## A data frame with columns for epitope, strain id, and each coordinate
                                        n_epitopes,
                                        n_ab = 99,
                                        rel_immuno,
@@ -42,6 +42,7 @@ generate_ferret_repertoire <- function(native_epitope_coords, ## A data frame wi
   draw_this_many = floor(n_ab*rel_immuno/sum(rel_immuno))
   remainder = n_ab - sum(draw_this_many)
   cat(sprintf('Drawing %i Abs per individual. %i were requested. Remainder is %i.\n', sum(draw_this_many), n_ab, remainder))
+  stopifnot(length(draw_this_many) == nrow(native_epitope_coords))
   
   library(foreach)
   foreach(ee = native_epitope_coords$epitope, 
@@ -67,7 +68,7 @@ extract_titer_inputs <- function(antigen_id, # To which antigen are we calculati
   
   ## Extract ab_position_list
   these_serum_abs <- merged_df %>% # Subset the master data frame
-    filter(antigen == serum_id) %>%
+    filter(serum == serum_id) %>%
     select(epitope, matches('c\\d_Ab'))
   
   ab_position_list = lapply(unique(these_serum_abs$epitope), ## Reformat into a list of matrices, one for each epitope
@@ -222,7 +223,7 @@ fit_stan_MDS <- function(
 
 
 ## Wrapper function to do it all
-infer_titer_map <- function(antigen_coords, # Data frame of ag coords 
+infer_ferret_map <- function(antigen_coords, # Data frame of ag coords 
                             relative_concentrations, # vector of relative concentrations (immunodominance) of Abs to each epitope. WILL NOT BE NORMALIZED. SHOULD SUM TO N EPITOPES.
                             n_epitopes, # n epitiopes
                             n_antigens,
@@ -237,19 +238,19 @@ infer_titer_map <- function(antigen_coords, # Data frame of ag coords
   
   ## Generate ferret repertoire
   ferret_repertoires <- lapply(1:n_antigens, function(this_ag){
-    generate_ferret_repertoire(native_epitope_coords = antigen_coords %>% filter(antigen == this_ag), 
+    generate_gaussian_repertoire(native_epitope_coords = antigen_coords %>% filter(antigen == this_ag), 
                                n_epitopes = n_epitopes,
                                n_ab = n_abs_per_serum, ## n antibodies per ferret
                                rel_immuno = relative_concentrations,
                                sigma = sigma)
   }) %>%
-    bind_rows(.id = 'antigen')
+    bind_rows(.id = 'serum')
   
   ## Merge the antigen coordinates with the Ab coordinates to calculate titers
   merged_df <- merge(antigen_coords %>%
                        select(epitope, antigen, c1, c2),
                      ferret_repertoires %>%
-                       select(epitope, antigen, c1, c2),
+                       select(serum, epitope, antigen, c1, c2),
                      by = c('epitope', 'antigen'), 
                      suffixes = c('_Ag', '_Ab'))
   
@@ -270,7 +271,7 @@ infer_titer_map <- function(antigen_coords, # Data frame of ag coords
     c('serum' = this.serum, 'antigen' = this.antigen, 'titer' = titer)
   }
   
-  titer_map <- with(expand.grid(antigen = 1:n_ag, serum = 1:n_ag),
+  titer_map <- with(expand.grid(antigen = 1:n_antigens, serum = 1:n_antigens),
                     mapply(FUN = titer_wrapper, 
                            this.serum = serum,
                            this.antigen = antigen)) %>% 
@@ -287,8 +288,8 @@ infer_titer_map <- function(antigen_coords, # Data frame of ag coords
   
   ## Fit the stan model
   fits <- fit_stan_MDS(observed_distances = format_stan_inputs(titer_map), 
-                       n_antigens = n_ag, 
-                       n_sera = n_ag, 
+                       n_antigens = n_antigens, 
+                       n_sera = n_antigens, 
                        n_dim = n_dim, 
                        chains = n_chains,
                        niter = n_iter)
@@ -297,7 +298,7 @@ infer_titer_map <- function(antigen_coords, # Data frame of ag coords
   
   return(list(ag_ab_coords = merged_df,
               titer_map = titer_map,
-              summary_inferred_coords = summary_coords,
+              summary_inferred_coords = extract_summary_coords(fits),
               stan_fits = fits))
 }
 
@@ -352,21 +353,26 @@ plot_antigen_coords <- function(antigen_coords){
 }
 
 
-plot_Ab_Ag_map <- function(ab_ag_df){
+plot_Ab_Ag_map <- function(ab_ag_df,
+                           antigen_coords){
+  antisera_to_strain = unique(ab_ag_df$antigen)
   ab_ag_df %>%
     ggplot() +
-    geom_point(aes(x = c1_Ab, y = c2_Ab, color = epitope), pch = 3) +
-    geom_point(aes(x = c1_Ag, y = c2_Ag, fill = epitope), pch = 21) +
-  #  geom_point(aes(x = c1, y = c2, fill = epitope), data = antigen_coords, pch = 22) +
-    guides(color=guide_legend(title="Abs to epitope"))+
+    geom_text(aes(x = c1, y = c2, color = antigen, label = epitope), data = antigen_coords, show.legend = F) + ## All epitope coords
+    geom_point(aes(x = c1_Ab, y = c2_Ab, color = antigen), pch = 3, alpha = .4) + # Ab coords
+    geom_text(aes(x = c1, y = c2, label = epitope), data = antigen_coords %>% filter(antigen == antisera_to_strain)) + # Highlight target antigen coords in black text and a circle
+   # geom_point(aes(x = c1, y = c2), pch = 1, data = antigen_coords %>% filter(antigen == antisera_to_strain)) +
+    guides(color=guide_legend(title="Abs to antigen"))+
     xlab('c1')+
-    ylab('c2')
+    ylab('c2')+
+    ggtitle(sprintf('Antiserum to strain %s', antisera_to_strain))
 }
 
-plot_inferred_original_map <- function(antigen_coords,
-                                       stan_fit){
 
-  
+
+plot_inferred_original_map <- function(antigen_coords,
+                                       stan_fit,
+                                       flip_these_chains_over_x = NULL){
   reformatted_df <- antigen_coords %>%
     mutate(kind = paste0('E', epitope)) %>%
     rename(allele = antigen) %>%
@@ -375,6 +381,7 @@ plot_inferred_original_map <- function(antigen_coords,
                          labels = c('antigen (estimated)', 'serum (estimated)', 'antigen 1 position (fixed)', 'epitope 1 (truth)', 'epitope 2 (truth)', 'epitope 3 (truth)')), ordered = T)
   
   epitope_strain_map <- extract_summary_coords(stan_fit) %>%
+    mutate(across(starts_with('c2'), ~ifelse(chain %in% flip_these_chains_over_x, -.x, .x))) %>%
     mutate(allele = as.factor(id)) %>%
     mutate(kind = factor(kind, levels = c('antigen', 'serum', 'fixed_ag1', 'E1', 'E2', 'E3'),
                          labels = c('antigen (estimated)', 'serum (estimated)', 'antigen 1 position (fixed)', 'epitope 1 (truth)', 'epitope 2 (truth)', 'epitope 3 (truth)')), ordered = T) %>%
@@ -382,7 +389,7 @@ plot_inferred_original_map <- function(antigen_coords,
     geom_point(aes(x = c1, y = c2, shape = kind), data = reformatted_df) +
     geom_polygon(aes(x = c1, y = c2, fill = allele), data = reformatted_df, alpha = .2)+
     geom_point(aes(x = c1, y = c2, shape = kind, color = allele)) +
-    facet_grid(allele~chain, labeller = label_both) +
+    facet_grid(.~chain, labeller = label_both) +
     scale_shape_manual(values = c(4, 14, 21, 22, 23, 3))
   
   epitope_strain_map
@@ -393,7 +400,7 @@ plot_inferred_original_map <- function(antigen_coords,
 extract_long_coords <- function(stan_fit){
   raw_fits <- rstan::extract(stan_fit)
   
-  long_antigen_coords <- lapply(1:(n_ag-2), function(ll) raw_fits$antigen_coords[,ll,] %>%
+  long_antigen_coords <- lapply(1:(dim(raw_fits$antigen_coords)[2]), function(ll) raw_fits$antigen_coords[,ll,] %>%
                                   magrittr::set_colnames(c('c1', 'c2')) %>%
                                   as_tibble() %>%
                                   mutate(chain = rep(1:n_chains, each = n_iter/2),
@@ -402,7 +409,7 @@ extract_long_coords <- function(stan_fit){
                                          kind = 'antigen')) %>%
     bind_rows()
   
-  long_serum_coords <- lapply(1:n_ag, function(ll) raw_fits$serum_coords[,ll,] %>%
+  long_serum_coords <- lapply(1:(dim(raw_fits$serum_coords)[2]), function(ll) raw_fits$serum_coords[,ll,] %>%
                                 magrittr::set_colnames(c('c1', 'c2')) %>%
                                 as_tibble() %>%
                                 mutate(chain = rep(1:n_chains, each = n_iter/2),
@@ -411,7 +418,7 @@ extract_long_coords <- function(stan_fit){
                                        kind = 'serum')) %>%
     bind_rows()
   
-  ag2_long <- tibble(id = 2, kind = 'antigen', chain = rep(1:n_chains, each = n_iter/2), c1 = raw_fits$ag2_c1) 
+  ag2_long <- tibble(id = 2, kind = 'antigen', chain = rep(1:n_chains, each = n_iter/2), c1 = raw_fits$ag2_c1, c2 = 0) 
   
   long_coords <- bind_rows(long_antigen_coords,
                            long_serum_coords,
@@ -431,7 +438,7 @@ extract_summary_coords <- function(stan_fit){
               c2.90 = quantile(c2, .9, na.rm = T)) %>%
     ungroup() %>%
     bind_rows(tibble(id = 1,
-                     kind = 'fixed_ag1', chain = 1:3, c1.10 = NA, c1 = 0, c1.90 = NA, c2.10 = NA, c2 = 0, c2.90 = NA)) 
+                     kind = 'fixed_ag1', chain = 1:4, c1.10 = NA, c1 = 0, c1.90 = NA, c2.10 = NA, c2 = 0, c2.90 = NA)) 
   summary_coords
 }
 
@@ -444,7 +451,11 @@ flip_summary_over_x <- function(original_coords,
           rename(antigen = id),
         by = 'antigen') %>%
     group_by(chain) %>%
-    summarise(flip.me = sum((c2.x > 0) == (c2.y > 0)) < sum((c2.x > 0) == (-c2.y > 0)))
+    summarise(flipped_error = sum((c2.x + c2.y)^2, na.rm = T),
+              original_error = sum((c2.x - c2.y)^2, na.rm = T),
+              flip.me = flipped_error<original_error)
+ cat(sprintf('chain %s flipped over x\n', flip.these.chains %>% filter(flip.me) %>% pull(chain)))
+ print(flip.these.chains)
  
  inferred_summary %>% 
    merge(flip.these.chains) %>%
@@ -455,3 +466,124 @@ flip_summary_over_x <- function(original_coords,
 negate <- function(x){
   -x
 }
+
+
+
+generate_one_serum <- function(native_epitope_coords, ## A data frame with columns for epitope, strain id, and each coordinate
+                                n_epitopes,
+                                total_ab = 1000,
+                                epitope_immunodominance, # a vector of the relative immunodominances of each epitope. Will be normalized.
+                                strain_dominance, # a vector of the relative dominance of each strain in the repertoire
+                                sigma = .1 ## sd of Ab positions around native_epitope_Coords)
+){
+  
+  n_ab_per_strain <- floor(total_ab*strain_dominance/sum(strain_dominance))
+  strains <- unique(native_epitope_coords$antigen)
+  
+  ## For each strain, draw Abs
+  foreach(this.strain = strains, this.n_ab = n_ab_per_strain) %do% {
+    generate_gaussian_repertoire(native_epitope_coords = filter(native_epitope_coords, antigen == this.strain),
+                                 n_epitopes = n_epitopes, 
+                                 n_ab = this.n_ab, 
+                                 rel_immuno = epitope_immunodominance, 
+                                 sigma = sigma) 
+  } %>%
+    bind_rows() %>%
+    merge(native_epitope_coords,
+          by = c('epitope', 'antigen'), suffixes = c('_Ab', '_Ag')) %>%
+    select(-starts_with('kind'))
+}  
+
+
+
+
+## Test this tomorrow
+
+infer_human_map <- function(ab_ag_df, # a long data frame of antigen coords and corresponding antibodies with an id column for distinct sera
+                            n_dim,
+                            n_chains = 4,
+                            n_iter = 5000){ 
+  
+  n_antigen = length(unique(ab_ag_df$antigen))
+  n_sera = length(unique(ag_ag_df$serum))
+  
+  ## Calculate the titer panel
+  ## Wrapper to calculate the titer for a given serum and antigen
+  
+  titer_wrapper <- function(this.serum, 
+                            this.antigen){
+    titer = with(extract_titer_inputs(antigen_id = this.antigen, 
+                                      serum_id = this.serum, 
+                                      merged_df = merged_df),
+                 solve_for_titer_multi_epitope(ab_position_list = ab_position_list, 
+                                               relative_concentrations = relative_concentrations, 
+                                               ag_list = ag_list, 
+                                               alpha = .25,
+                                               r = 7)
+    )
+    c('serum' = this.serum, 'antigen' = this.antigen, 'titer' = titer)
+  }
+  
+  titer_map <- with(expand.grid(antigen = 1:n_antigen, serum = 1:n_sera),
+                    mapply(FUN = titer_wrapper, 
+                           this.serum = serum,
+                           this.antigen = antigen)) %>% 
+    t() %>%
+    as_tibble() %>%
+    set_names(c('serum', 'antigen', 'titer')) %>%
+    mutate(logtiter = log2(titer/10)) %>%
+    group_by(serum) %>%
+    mutate(serum_potency = max(logtiter)) %>%
+    ungroup() %>% group_by(antigen) %>%
+    mutate(antigen_avidity = max(logtiter)) %>%
+    ungroup() %>%
+    mutate(titer_distance = (serum_potency+antigen_avidity)/2 - logtiter)
+  
+  ## Fit the stan model
+  fits <- fit_stan_MDS(observed_distances = format_stan_inputs(titer_map), 
+                       n_antigens = n_antigen, 
+                       n_sera = n_sera, 
+                       n_dim = n_dim, 
+                       chains = n_chains,
+                       niter = n_iter)
+  
+  
+  
+  return(list(ag_ab_coords = merged_df,
+              titer_map = titer_map,
+              summary_inferred_coords = extract_summary_coords(fits),
+              stan_fits = fits))
+}
+
+
+plot_inferred_original_map2 <- function(stan_fits,
+                                        weights_for_shift, # An E-vector giving the weight of each epitope for calculating the centroids
+                                        antigen_coords,
+                                        flip_these_chains_over_x){
+  inferred_map <- extract_summary_coords(stan_fits) %>%
+    mutate(id = as.factor(id)) %>%
+    mutate(c2 = ifelse(chain %in% flip_these_chains_over_x, -c2, c2))
+  
+  weights_for_shift = weights_for_shift/sum(weights_for_shift)
+  ag1_ag2_centroids = antigen_coords %>%
+    group_by(antigen) %>%
+    summarise(epitope = NA,
+              antigen = unique(antigen), 
+              kind = 'antigen',
+              c1 = sum(c1*weights_for_shift),
+              c2 = sum(c2*weights_for_shift))
+  
+  true_coords = standardize_coordinate_df(coord_df = bind_rows(ag1_ag2_centroids, antigen_coords), # Standardize to Ag1, Ag2 centroids
+                                          ag1_row = 1, ag2_row = 2) %>%
+    filter(!is.na(epitope)) %>% # Remove ag1, ag2 centroids
+    group_by(antigen) %>%
+    mutate(centroid1 = sum(c1*weights_for_shift),
+           centroid2 = sum(c2*weights_for_shift))
+  
+  ggplot() +
+    geom_polygon(aes(x = c1, y = c2, fill = antigen), data = true_coords, alpha = .05) +
+    geom_point(aes(x = centroid1, y = centroid2, color = antigen), data = true_coords, pch = 1) +
+    geom_point(aes(x = c1, y = c2, color = id, shape = kind), data = inferred_map)
+}
+
+  
