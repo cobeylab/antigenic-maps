@@ -613,5 +613,29 @@ plot_compare_distances <- function(fitlist){
     ggtitle(sprintf('sum square error is %2.2f', sum_square_error))
 }
 
-
+get_one_inferred_distance <- function(serum, 
+                                      antigen, 
+                                      this.chain,
+                                      summary_coords){
+  this.serum = summary_coords %>% 
+    filter(id == serum & kind == 'serum') %>%
+    filter(chain == this.chain)
+  this.antigen = summary_coords %>%
+    filter(id == antigen & kind == 'antigen') %>%
+    filter(chain == this.chain)
+  # each_chain = foreach(ag.c1 = this.antigen$c1, 
+  #                      ag.c2 = this.antigen$c2,
+  #                      ab.c1 = this.serum$c1,
+  #                      ab.c2 = this.serum$c2,
+  #                      .combine = 'c') %do% {
+  #                        get_euclidean_distance(v1 = c(ab.c1, ab.c2),
+  #                                               v2 = c(ag.c1, ag.c2))
+  #                      }
+  # mean(each_chain)
+  stopifnot(nrow(this.serum) <= 1)
+  stopifnot(nrow(this.antigen) <= 1)
+  if(any(nrow(this.serum)==0, nrow(this.antigen) == 0)){return(NA)}
+  get_euclidean_distance(v1 = c(this.serum$c1, this.serum$c2),
+                         v2 = c(this.antigen$c1, this.antigen$c2))
+}
   
