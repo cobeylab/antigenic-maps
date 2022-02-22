@@ -184,6 +184,7 @@ fit_stan_MDS <- function(
   chains = 3, # Number of MCMC chains to run
   cores = parallel::detectCores(logical = F), # For the cluster
   niter = 5000,
+  antigen_coords,
   ...
 ) {
   library(rstan)
@@ -585,5 +586,32 @@ plot_inferred_original_map2 <- function(stan_fits,
     geom_point(aes(x = centroid1, y = centroid2, color = antigen), data = true_coords, pch = 1) +
     geom_point(aes(x = c1, y = c2, color = id, shape = kind), data = inferred_map)
 }
+
+
+
+compare_distances <- function(fitlist){
+  nchains = (rstan::extract(fitlist$stan_fits, permuted = F) %>% dim())[2]
+  fitlist$titer_map %>%
+    expand_grid(chain = 1:nchains) %>%
+    mutate(chain = as.numeric(chain)) %>%
+    rowwise() %>%
+    mutate(inferred_distance = get_one_inferred_distance(serum, antigen, chain, fitlist$summary_inferred_coords)) %>%
+    filter(!is.na(inferred_distance)) %>%
+    ungroup() %>%
+    arrange(inferred_distance)
+}
+
+plot_compare_distances <- function(fitlist){
+  compare_distances <- compare_distances(fitlist)
+  sum_square_error = compare_distances %>%
+    summarise(rs_error = sum((inferred_distance-titer_distance)^2))
+  
+  ggplot(compare_distances) +
+    geom_point(aes(x = (titer_distance), y = (inferred_distance), color = as.factor(chain)), alpha = .3, size = 3) +
+    geom_abline(lty = 2, lwd = .5) +
+    theme(legend.position = c(.25, .75)) +
+    ggtitle(sprintf('sum square error is %2.2f', sum_square_error))
+}
+
 
   
