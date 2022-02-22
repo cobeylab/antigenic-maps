@@ -557,6 +557,19 @@ infer_human_map <- function(ab_ag_df, # a long data frame of antigen coords and 
 }
 
 
+get_weighted_centroids <- function(antigen_coords,
+                                   immunodominance_weights){
+  immunodominance_weights = immunodominance_weights/sum(immunodominance_weights)
+  antigen_coords %>%
+    group_by(antigen) %>%
+    summarise(epitope = NA,
+              antigen = unique(antigen), 
+              kind = 'antigen',
+              c1 = sum(c1*immunodominance_weights),
+              c2 = sum(c2*immunodominance_weights))
+}
+
+
 plot_inferred_original_map2 <- function(stan_fits,
                                         weights_for_shift, # An E-vector giving the weight of each epitope for calculating the centroids
                                         antigen_coords,
@@ -565,14 +578,7 @@ plot_inferred_original_map2 <- function(stan_fits,
     mutate(id = as.factor(id)) %>%
     mutate(c2 = ifelse(chain %in% flip_these_chains_over_x, -c2, c2))
   
-  weights_for_shift = weights_for_shift/sum(weights_for_shift)
-  ag1_ag2_centroids = antigen_coords %>%
-    group_by(antigen) %>%
-    summarise(epitope = NA,
-              antigen = unique(antigen), 
-              kind = 'antigen',
-              c1 = sum(c1*weights_for_shift),
-              c2 = sum(c2*weights_for_shift))
+  ag1_ag2_centroids = get_weighted_centroids(antigen_coords, weights_for_shift)
   
   true_coords = standardize_coordinate_df(coord_df = bind_rows(ag1_ag2_centroids, antigen_coords), # Standardize to Ag1, Ag2 centroids
                                           ag1_row = 1, ag2_row = 2) %>%
@@ -637,5 +643,15 @@ get_one_inferred_distance <- function(serum,
   if(any(nrow(this.serum)==0, nrow(this.antigen) == 0)){return(NA)}
   get_euclidean_distance(v1 = c(this.serum$c1, this.serum$c2),
                          v2 = c(this.antigen$c1, this.antigen$c2))
+}
+
+plot_compare_distance_tiles <- function(fitlist){
+  compare_distances(fitlist) %>%
+    mutate(distance_difference = titer_distance - inferred_distance) %>% 
+    pivot_longer(contains('distance')) %>% 
+    ggplot() + 
+    geom_tile(aes(x = antigen, y = serum, fill = value))   +
+    facet_wrap(.~name) +
+    scale_fill_viridis_c()
 }
   
