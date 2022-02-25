@@ -14,7 +14,7 @@ from p. 3 of their main text:
 * To what extent does the map's toplogy (projected into D1, D2) change if we infer the map in higher dimensions?
 * To what extent do inferred pairwise distances change if we infer the map in higher dimensions?
 
-** 1. Check data**
+**1. Check data**
 `check_data.Rmd`
 
 Smith et al., 2004 did not publish supplementary data.
