@@ -185,18 +185,20 @@ fit_stan_MDS <- function(
   cores = parallel::detectCores(logical = F), # For the cluster
   niter = 5000,
   antigen_coords,
+  diagnostic_file = NULL,
   ...
 ) {
   library(rstan)
+
   
   stopifnot(nrow(observed_distances) == n_antigens)
   stopifnot(ncol(observed_distances) == n_sera)
   
-  model <- stan_model('../Bayesian_stan/MDS.stan')
+  model <- stan_model(mod)
   #(print(model))
   
   model_input_data <- list(
-    n_strains = n_antigens,
+    n_antigens = n_antigens,
     n_sera = n_sera,
     n_dim = n_dim,
     observed_distances = observed_distances
@@ -210,49 +212,68 @@ fit_stan_MDS <- function(
     )
   }
   
-  initial_fit <- sampling(
-    model, model_input_data, chains = chains, cores = cores, 
-    init = initfun,
-    iter = niter,
-    control = list(adapt_delta = 0.89,
-                   max_treedepth = 14),
-    ...
+  initial_fit <- sampling(model, 
+                          data = model_input_data, 
+                          chains = chains, 
+                          init = initfun,
+                          iter = niter,
+                          control = list(adapt_delta = 0.89,
+                                         max_treedepth = 14),
+                          diagnostic_file = diagnostic_file
   )
+  
+  if(all(summary(initial_fit)$summary[,'Rhat'] <= 1.1)){
+    cat(sprintf('Returning initial fit'))
+    return(initial_fit)
+  }
   
   cat(print('Initial fit complete.\nRe-running using initial values from the best chain.\n'))
   
-  initialize_with_best_chain <- function(initial_fit){
+  initialize_with_best_chain <- function(initial_fit, nchains){
     ## Extract the summary of the best chain in terms of mean log posterior
     best_chain_index = which.max(rstan::extract(initial_fit, permute = F)[,,'lp__'] %>% colMeans())
+    best_chain_summary = rstan::summary(initial_fit)$c_summary[,,best_chain_index]
     best_chain = rstan::extract(initial_fit, permute = F)[,best_chain_index,]
     
     is.antigen.coord = sapply(dimnames(best_chain_summary)$parameter, FUN = function(xx) grepl('antigen_coords', xx))
     is.serum.coord = sapply(dimnames(best_chain_summary)$parameter, FUN = function(xx) grepl('serum_coords', xx))
     
     
-    get_one_list <- function(this.iter){
+    get_one_list <- function(){
     ## Output an initial list using the median values from the best chain
-    list(sigma = best_chain[this.iter, 'sigma'],
-         ag2_c1 = best_chain[this.iter, 'ag2_c1'],
-         strain_coords = matrix(best_chain[this.iter, is.antigen.coord], 
+    list(sigma = best_chain_summary['sigma', '50%'],
+         ag2_c1 = best_chain_summary['ag2_c1', '50%'],
+         antigen_coords = matrix(best_chain_summary[is.antigen.coord,'50%'], 
                                 nrow = n_antigens-2, 
                                 ncol = n_dim,
                                 byrow = T),
-         serum_coords = matrix(best_chain[this.iter, is.serum.coord], 
+         serum_coords = matrix(best_chain_summary[is.serum.coord,'50%'], 
                                nrow = n_sera, 
                                ncol = n_dim,
                                byrow = T))
     }
     
-    lapply(sample(x = 1:(niter/2), size = chains, replace = F), get_one_list)
+  lapply(1:nchains, function(xx){get_one_list()})
   }
   
-  inits <- initialize_with_best_chain(initial_fit)
+  inits <- initialize_with_best_chain(initial_fit, 1)
   
   refit <- sampling(
-    model, model_input_data, chains = chains, cores = cores, 
+    model, model_input_data, 
+    chains = 1, 
     init = inits,
-    iter = niter)
+    iter = niter,
+    diagnostic_file = diagnostic_file)
+  
+  if(! all(summary(refit)$summary[,'Rhat'] <= 1.1)){
+    cat(sprintf('Re-doing refit to achieve Rhat < 1.1'))
+    refit <- sampling(
+      model, model_input_data, 
+      chains = 1, 
+      init = inits,
+      iter = niter,
+      diagnostic_file = diagnostic_file)
+  }
 
   return(refit)
 }
@@ -261,17 +282,16 @@ fit_stan_MDS <- function(
 
 
 
-## Wrapper function to do it all
-infer_ferret_map <- function(antigen_coords, # Data frame of ag coords 
-                            relative_concentrations, # vector of relative concentrations (immunodominance) of Abs to each epitope. WILL NOT BE NORMALIZED. SHOULD SUM TO N EPITOPES.
+## Generate serum panel, and titer map, for a given set of antigen coords and an immunodominance scheme
+generate_ferret_inputs <- function(antigen_coords, # Data frame of ag coords 
+                            relative_immunodominance, # vector of relative concentrations (immunodominance) of Abs to each epitope.
                             n_epitopes, # n epitiopes
                             n_antigens,
                             n_abs_per_serum = 500,
-                            plotdir,
                             sigma = 1 # sd of abs around native coord
                             ){ # n antigens
   
-  if(sum(relative_concentrations) != n_epitopes){warning('Relative concentrations dont sum to n_epitopes. This will rescale the total Ab concentration.')}
+  if(sum(relative_immunodominance) != n_epitopes){warning('Relative concentrations dont sum to n_epitopes. This will rescale the total Ab concentration.')}
   stopifnot(length(unique(antigen_coords$antigen)) == n_antigens)
   stopifnot(length(unique(antigen_coords$epitope)) == n_epitopes)
   
@@ -280,7 +300,7 @@ infer_ferret_map <- function(antigen_coords, # Data frame of ag coords
     generate_gaussian_repertoire(native_epitope_coords = antigen_coords %>% filter(antigen == this_ag), 
                                n_epitopes = n_epitopes,
                                n_ab = n_abs_per_serum, ## n antibodies per ferret
-                               rel_immuno = relative_concentrations,
+                               rel_immuno = relative_immunodominance,
                                sigma = sigma)
   }) %>%
     bind_rows(.id = 'serum')
@@ -302,7 +322,7 @@ infer_ferret_map <- function(antigen_coords, # Data frame of ag coords
                                       serum_id = this.serum, 
                                       merged_df = merged_df),
                  solve_for_titer_multi_epitope(ab_position_list = ab_position_list, 
-                                               relative_concentrations = relative_concentrations, 
+                                               relative_concentrations = relative_immunodominance, 
                                                ag_list = ag_list, 
                                                alpha = .25,
                                                r = 7)
@@ -325,21 +345,24 @@ infer_ferret_map <- function(antigen_coords, # Data frame of ag coords
     ungroup() %>%
     mutate(titer_distance = (serum_potency+antigen_avidity)/2 - logtiter)
   
-  ## Fit the stan model
-  fits <- fit_stan_MDS(observed_distances = format_stan_inputs(titer_map), 
-                       n_antigens = n_antigens, 
-                       n_sera = n_antigens, 
-                       n_dim = n_dim, 
-                       chains = n_chains,
-                       niter = n_iter)
-  
-  
-  
   return(list(ag_ab_coords = merged_df,
-              titer_map = titer_map,
-              summary_inferred_coords = extract_summary_coords(fits),
-              stan_fits = fits))
+              titer_map = titer_map))
+  
 }
+  
+
+# 
+#   ## Fit the stan model
+#   fits <- fit_stan_MDS(observed_distances = format_stan_inputs(titer_map), 
+#                        n_antigens = n_antigens, 
+#                        n_sera = n_antigens, 
+#                        n_dim = n_dim, 
+#                        chains = n_chains,
+#                        niter = n_iter)
+#   
+#   
+# 
+# }
 
 
 

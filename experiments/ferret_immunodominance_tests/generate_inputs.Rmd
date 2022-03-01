@@ -1,0 +1,135 @@
+---
+title: "Muti epitope maps -- ferrets"
+output: html_notebook
+---
+
+
+
+**Workflow:**
+
+1. Simulate a three-epitope pathogen with 5 antigens of each epitope represented on a 2D map.
+2. Simulate ferret antibody repertoires to the epitope.
+3. Calculate each ferret's titer to each strain to simulate a sero panel.
+
+------
+
+Next script:
+
+4. From the sero panel, infer the "strain map" in 1, 2, 3, ... 8 dimensions.
+5. Repeat under conditions of even, skewed, and variable immunodominance.
+6. Calculate the map error for each fit.
+
+
+
+```{r}
+source('../../multi_epitope_code.R')
+source('../../code.R')
+library('foreach')
+reset() ## clear workspace and load packages
+
+
+n_antigens = 5
+n_ab = 0
+n_chains = 4
+n_iter = 5000 # half will be burn in
+n_epitopes = 3
+
+outdir = 'ferret_immunodominance_tests'
+if(!dir.exists(outdir)) dir.create(outdir)
+```
+
+## Generate antigen coordinates. Each antigen consists of 3 epitopes.
+```{r}
+set.seed(13)
+antigen_coords <- tibble(epitope = rep(c(1:n_epitopes), each = n_antigens),
+                         antigen = rep(1:n_antigens, n_epitopes),
+                         kind = 'antigen',
+                         c1 = generate_ag_coords_random(n_antigens, n_epitopes),
+                         c2 = generate_ag_coords_random(n_antigens, n_epitopes)) %>%
+  mutate(epitope = as.factor(epitope),
+         antigen = as.factor(antigen))
+
+
+## Standardize so that Ag1 epitope 1 is at the origin and Ag2 epitope 1 is on the x-axis
+shifted_coords <-  standardize_coordinates(coord_mat = antigen_coords %>% select(starts_with('c')) %>% as.matrix(), ag1_row = 1, ag2_row = 2) %>%
+  as_tibble() %>%
+  set_names(c('c1', 'c2'))
+
+antigen_coords$c1 = shifted_coords$c1
+antigen_coords$c2 = shifted_coords$c2
+
+write_csv(antigen_coords, paste0(outdir, '/antigen_coords.csv'))
+```
+
+## Plot the coordinates
+```{r}
+antigen_coords %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, color = antigen, shape = epitope)) +
+  geom_polygon(aes(x = c1, y = c2, fill = antigen), alpha = .2)
+ggsave(filename = paste0(outdir, '/epitope_coords_polygon.png'))
+```
+
+```{r}
+antigen_coords %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, color = antigen, shape = epitope)) +
+  facet_wrap(.~epitope)
+ggsave(filename = paste0(outdir, '/epitope_coords_grid.png'))
+```
+## Generate sera and titer inputs
+```{r}
+even_immunodominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(1, 1, 1), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 1000, 
+                                                      sigma = .1)
+```
+
+
+```{r}
+skewed_immunodominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(1+2/3, 1, 1/3), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 1000, 
+                                                      sigma = .1)
+```
+
+
+```{r}
+E1_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(3, 0, 0), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 1000, 
+                                                      sigma = .1)
+```
+
+```{r}
+E2_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(0, 3, 0), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 1000, 
+                                                      sigma = .1)
+```
+
+```{r}
+E3_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(0, 0, 3), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 1000, 
+                                                      sigma = .1)
+```
+
+## Save inputs
+```{r}
+write_rds(even_immunodominance_inputs, paste0(outdir, '/even_immunodominance_inputs.rds'))
+write_rds(skewed_immunodominance_inputs, paste0(outdir, '/skewed_immunodominance_inputs.rds'))
+write_rds(E1_complete_dominance_inputs, paste0(outdir, '/E1_complete_dominance_inputs.rds'))
+write_rds(E2_complete_dominance_inputs, paste0(outdir, '/E2_complete_dominance_inputs.rds'))
+write_rds(E3_complete_dominance_inputs, paste0(outdir, '/E3_complete_dominance_inputs.rds'))
+```
