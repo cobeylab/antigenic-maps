@@ -115,6 +115,7 @@ The methods of Smith et al. 2004 state:
 ```{r}
 Smith_data <- Bedford_data %>%
   filter(source %in% c('Smith2004'))
+write_csv(Smith_data, file = 'Smith_2004_subset_of_Bedford_2014.csv')
 ```
 
 

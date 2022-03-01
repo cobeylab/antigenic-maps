@@ -253,63 +253,10 @@ fit_stan_MDS <- function(
     model, model_input_data, chains = chains, cores = cores, 
     init = inits,
     iter = niter)
-  
-  cat(print('Expected inits'))
-  print(inits)
-  cat(print('Actual inits'))
-  print(inits(refit))
-  
+
   return(refit)
 }
 
-
-refit_stan_MDS <- function(
-  ## Input an initial fit, and use coordinates drawn from the chain with the highest posterior as the new initial conditions
-  mod = 'MDS.stan',
-  observed_distances, # n_antigen x n_antibody matrix of distances
-  n_antigens, # integer
-  n_sera, # integer
-  n_dim, # integer
-  chains = 3, # Number of MCMC chains to run
-  cores = parallel::detectCores(logical = F), # For the cluster
-  niter = 5000,
-  antigen_coords,
-  ...
-) {
-  library(rstan)
-  
-  stopifnot(nrow(observed_distances) == n_antigens)
-  stopifnot(ncol(observed_distances) == n_sera)
-  
-  model <- stan_model('../Bayesian_stan/MDS.stan')
-  (print(model))
-  
-  model_input_data <- list(
-    n_strains = n_antigens,
-    n_sera = n_sera,
-    n_dim = n_dim,
-    observed_distances = observed_distances
-  )
-  
-  initfun <- function(){
-    list(sigma = 1,
-         ag2_c1 = runif(1, 0, 10),
-         strain_coords = matrix(runif((n_antigens-2)*n_dim, -10, 10), n_antigens-2, n_dim),
-         serum_coords =  matrix(runif(n_sera*n_dim, -10, 10), n_sera, n_dim)
-    )
-  }
-  
-  fit <- sampling(
-    model, model_input_data, chains = chains, cores = cores, 
-    init = initfun,
-    iter = niter,
-    control = list(adapt_delta = 0.89,
-                   max_treedepth = 14),
-    ...
-  )
-  
-  return(fit)
-}
 
 
 

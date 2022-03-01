@@ -9,6 +9,10 @@ zeroish <- function(x){
   abs(x) <= .Machine$double.eps^.5
 }
 
+equal_ish <- function(xx, yy = 0){
+  abs(xx-yy) <= .Machine$double.eps^.5
+}
+
 ndim <- function(xx){
   ldim <- length(dim(xx)) ## Unlike dim, will print 0 if a vector
   if(ldim >= 2){
@@ -18,34 +22,31 @@ ndim <- function(xx){
   }
 }
 
-equal_ish <- function(xx, yy = 0){
-  abs(xx-yy) <= 1e-6
-}
 
-generate_map_coordinates <- function(n_dim, # Dimensions in Euclidean space 
-                                     n_antigens, # Number of antigens in panel (n_antigens + n_sera must be > n_dim + 1)
-                                     n_sera, # Number of sera/mAbs in panel 
-                                     map_range = c(0, 1) # c(min, max) of each axis in the standard basis
-){
-  ## Draw antigen and serum locations from a uniform distribution across each axis
-  nn = (n_antigens+n_sera)
-  stopifnot(nn > (n_dim + 1))
-  ## Draw a vector of coordinates
-  coords = runif(nn*n_dim, map_range[1], map_range[2])
-  ## Recast the vector into a data frame with n_dim columns
-  coords = matrix(coords, nrow = nn, 
-                  ncol = n_dim, 
-                  dimnames = list(NULL, paste0('c', 1:n_dim))) %>%
-    as.tibble()
-  ## Bind into a tibble with id columns and return
-  id_names = c(
-    if(n_antigens < 1) NULL else 1:n_antigens,
-    if(n_sera < 1) NULL else 1:n_sera
-  )
-  tibble(id = id_names,
-         kind = rep(c('antigen', 'serum'), c(n_antigens, n_sera))) %>%
-    bind_cols(coords)
-}
+# generate_map_coordinates <- function(n_dim, # Dimensions in Euclidean space 
+#                                      n_antigens, # Number of antigens in panel (n_antigens + n_sera must be > n_dim + 1)
+#                                      n_sera, # Number of sera/mAbs in panel 
+#                                      map_range = c(0, 1) # c(min, max) of each axis in the standard basis
+# ){
+#   ## Draw antigen and serum locations from a uniform distribution across each axis
+#   nn = (n_antigens+n_sera)
+#   stopifnot(nn > (n_dim + 1))
+#   ## Draw a vector of coordinates
+#   coords = runif(nn*n_dim, map_range[1], map_range[2])
+#   ## Recast the vector into a data frame with n_dim columns
+#   coords = matrix(coords, nrow = nn, 
+#                   ncol = n_dim, 
+#                   dimnames = list(NULL, paste0('c', 1:n_dim))) %>%
+#     as.tibble()
+#   ## Bind into a tibble with id columns and return
+#   id_names = c(
+#     if(n_antigens < 1) NULL else 1:n_antigens,
+#     if(n_sera < 1) NULL else 1:n_sera
+#   )
+#   tibble(id = id_names,
+#          kind = rep(c('antigen', 'serum'), c(n_antigens, n_sera))) %>%
+#     bind_cols(coords)
+# }
 
 
 coord_tibble_to_matrix <- function(coord_tibble){
@@ -67,7 +68,9 @@ get_euclidean_distance<- function(v1, v2){
 }
 
 
-get_ab_ag_distances <- function(ab_coords, ag_coords){
+get_ab_ag_distances <- function(ab_coords, # matrix of Ab coords. Each column is a dimension. Each row is an Ab.
+                                ag_coords # matrix of Ag coords. Each column is a dimension. Each row is an Ag.
+                                ){
   distmat = matrix(NA, nrow = nrow(ag_coords), ncol = nrow(ab_coords))
   rownames(distmat) = paste0('ag', 1:nrow(ag_coords))
   colnames(distmat) = paste0('ab', 1:nrow(ab_coords))
@@ -80,7 +83,7 @@ get_ab_ag_distances <- function(ab_coords, ag_coords){
 }
 
 
-generate_initial_guess <- function(n_antigens, n_sera, n_dim){
+generate_initial_random_guess <- function(n_antigens, n_sera, n_dim){
   
   ag_coords <- runif(n_antigens*n_dim, -10, 10)
   names(ag_coords) = paste0('ag', rep(1:n_antigens, n_dim), 'c', rep(1:n_dim, each = n_antigens))
@@ -119,10 +122,10 @@ fit_MDS_least_squares <- function(
   cl <- makeCluster(n_cores)
   registerDoParallel(cl)
   fit_list <- foreach(ii=1:10,
-                      .export = c('generate_initial_guess', 
+                      .export = c('generate_initial_random_guess', 
                                   'get_ab_ag_distances',
                                   'get_euclidean_distance')) %dopar% {
-    optim(par = generate_initial_guess(n_antigens, n_sera, n_dim),
+    optim(par = generate_initial_random_guess(n_antigens, n_sera, n_dim),
           fn = loss_function,
           observed_distances = observed_distances,
           n_antigens = n_antigens, 
@@ -324,4 +327,28 @@ standardize_coordinate_df<-function(coord_df,
     select(-matches('c\\d')) %>%
     bind_cols(as_tibble(standardized_matrix))
   
+}
+
+
+
+get_titer_distances <- function(sera,
+                                strains,
+                                titer = NULL,
+                                log2titer,
+                                min_dilution_tested = 10
+){
+  ## Check titer inputs
+  
+  ## Convert to data frame
+  
+  ## Group by strain, serum and calculate serum potency and strain avidity
+  
+  ## Calculate the distances
+  
+  ## Format into a matrix
+}
+
+
+titer_distance_df_to_matrix <- function(titer_distance_df){
+  ## Convert to matrix
 }

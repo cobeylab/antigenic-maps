@@ -45,7 +45,7 @@ plot_antigen_coords(antigen_coords)
 
 Infer maps
 ```{r, echo=F, include=F}
-oneAb_per_epitope <- infer_titer_map(antigen_coords = antigen_coords, relative_concentrations = c(1,1,1), n_epitopes = 3, n_antigens = 5, n_abs_per_serum = 3, plotdir = 'test_1Ab_per_epitope')
+oneAb_per_epitope <- infer_ferret_map(antigen_coords = antigen_coords, relative_concentrations = c(1,1,1), n_epitopes = 3, n_antigens = 5, n_abs_per_serum = 3, plotdir = 'test_1Ab_per_epitope')
 ```
 Plot heatmap
 ```{r}
@@ -90,7 +90,7 @@ antigen_coords$c2 = shifted_coords$c2
 
 Infer titer map
 ```{r echo=FALSE, include=FALSE}
-one_epitope_no_ab_jitter <- infer_titer_map(antigen_coords = antigen_coords, 
+one_epitope_no_ab_jitter <- infer_ferret_map(antigen_coords = antigen_coords, 
                                             relative_concentrations = c(1),
                                             n_epitopes = 1, 
                                             n_antigens = 5, 
@@ -101,8 +101,8 @@ one_epitope_no_ab_jitter <- infer_titer_map(antigen_coords = antigen_coords,
 
 Plot ags and abs
 ```{r}
-one_epitope_no_ab_jitter$ag_ab_df %>%
- plot_Ab_Ag_map()
+one_epitope_no_ab_jitter$ag_ab_coords %>%
+ plot_Ab_Ag_map_v2(antigen_coords = antigen_coords)
   
 ```
 
@@ -125,19 +125,20 @@ one_epitope_no_ab_jitter$inferred_map_plot +
 
 Infer titer map
 ```{r echo=FALSE, include=FALSE}
-one_epitope_no_ab_withjitter <- infer_titer_map(antigen_coords = antigen_coords, 
+one_epitope_no_ab_withjitter <- infer_ferret_map(antigen_coords = antigen_coords, 
                                             relative_concentrations = c(1),
                                             n_epitopes = 1, 
                                             n_antigens = 5, 
                                             n_abs_per_serum = 10, 
-                                            plotdir = 'test02_one_epitope_no_ab_withjitter', sigma = 1)
+                                            plotdir = 'test02_one_epitope_no_ab_withjitter', 
+                                            sigma = .1)
 ```
 
 
 Plot ags and abs
 ```{r}
-one_epitope_no_ab_withjitter$ag_ab_df %>%
- plot_Ab_Ag_map() +
+one_epitope_no_ab_withjitter$ag_ab_coords %>%
+ plot_Ab_Ag_map(antigen_coords) +
 facet_wrap(.~antigen, labeller = label_both)
   
 ```
@@ -148,8 +149,8 @@ View the inferred points.
 
 --> This looks good. The inferred points are an exact match, or a reflection about the x axis.
 ```{r}
-one_epitope_no_ab_jitter$inferred_map_plot +
-  facet_wrap(.~chain)
+plot_inferred_original_map(antigen_coords, one_epitope_no_ab_withjitter$stan_fits)
+  
 ```
 
 
