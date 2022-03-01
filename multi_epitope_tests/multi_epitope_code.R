@@ -399,47 +399,84 @@ plot_inferred_original_map <- function(antigen_coords,
 
 
 extract_long_coords <- function(stan_fit){
-  raw_fits <- rstan::extract(stan_fit)
+  raw_fits <- rstan::extract(stan_fit, permuted = F, inc_warmup = F)
+  niter <- dim(raw_fits)[1]
+  nchains <- dim(raw_fits)[2]
   
-  long_antigen_coords <- lapply(1:(dim(raw_fits$antigen_coords)[2]), function(ll) raw_fits$antigen_coords[,ll,] %>%
-                                  magrittr::set_colnames(c('c1', 'c2')) %>%
-                                  as_tibble() %>%
-                                  mutate(chain = rep(1:n_chains, each = n_iter/2),
-                                         id = ll+2,
-                                         iter = 1:nrow(.),
-                                         kind = 'antigen')) %>%
-    bind_rows()
+  parnames = dimnames(raw_fits)[3]
+  parname_contains <- function(parnames, this_pattern){sapply(parnames, function(xx) grepl(pattern = this_pattern, x = xx)) %>% as.vector()}
+  is_antigen_coord = parname_contains(parnames, 'antigen_coords')
+  is_serum_coord = parname_contains(parnames, 'serum_coords')
+  is_log_posterior = parname_contains(parnames, 'lp_')
   
-  long_serum_coords <- lapply(1:(dim(raw_fits$serum_coords)[2]), function(ll) raw_fits$serum_coords[,ll,] %>%
-                                magrittr::set_colnames(c('c1', 'c2')) %>%
-                                as_tibble() %>%
-                                mutate(chain = rep(1:n_chains, each = n_iter/2),
-                                       id = ll,
-                                       iter = 1:nrow(.),
-                                       kind = 'serum')) %>%
-    bind_rows()
   
-  ag2_long <- tibble(id = 2, kind = 'antigen', chain = rep(1:n_chains, each = n_iter/2), c1 = raw_fits$ag2_c1, c2 = 0) 
+  ag_coords = raw_fits[,,is_antigen_coord]
+  serum_coords = raw_fits[,,is_serum_coord]
+  ag2_coords = raw_fits[,,parname_contains(parnames, 'ag2')]
+  
+  #cat(print('checkpoint 1\n'))
+  long_antigen_coords <- apply(ag_coords, 2, function(xx){as_tibble(xx) %>% mutate(iter = 1:niter)}) %>%
+    bind_rows(.id = 'chain') %>%
+    extract(chain, 'chain', regex = 'chain:(\\d?)', convert = T) %>%
+    mutate(kind = 'antigen') %>%
+    pivot_longer(contains('antigen_coords'), names_to = c('allele', 'coordinate'), names_pattern = 'antigen_coords.(\\d+),(\\d+).', values_to = 'value') %>%
+    mutate(allele = as.numeric(allele) + 2) %>%
+    pivot_wider(id_cols = c(chain, iter, allele, kind), names_from = coordinate, names_prefix = 'c', values_from = value) 
+  
+  #cat(print('checkpoint 2\n'))
+  long_serum_coords <- apply(serum_coords, 2, function(xx){as_tibble(xx) %>% mutate(iter = 1:niter)}) %>%
+    bind_rows(.id = 'chain') %>%
+    extract(chain, 'chain', regex = 'chain:(\\d?)', convert = T) %>%
+    mutate(kind = 'serum') %>%
+    pivot_longer(contains('serum_coords'), names_to = c('allele', 'coordinate'), names_pattern = 'serum_coords.(\\d+),(\\d+).', values_to = 'value') %>%
+    mutate(allele = as.numeric(allele)) %>%
+    pivot_wider(id_cols = c(chain, iter, allele, kind), names_from = coordinate, names_prefix = 'c', values_from = value) 
+  
+  #cat(print('checkpoint 3\n'))
+  ag2_long <- apply(ag2_coords, 2, function(xx){as_tibble(xx) %>% mutate(iter = 1:niter)}) %>%
+    bind_rows(.id = 'chain') %>%
+    extract(chain, 'chain', regex = 'chain:(\\d?)', convert = T) %>%
+    rename(c1 = value) %>%
+    mutate(allele = 2) %>%
+    mutate(kind = 'antigen') %>%
+    select(chain, iter, allele, kind, c1)
+  
+  ## If more than 3 dimensions, pad ag2 data frame with 0s
+  if(any(! (colnames(long_antigen_coords) %in% colnames(ag2_long)) )) {
+    add_these_columns <- colnames(long_antigen_coords)[!(colnames(long_antigen_coords) %in% colnames(ag2_long))]
+    for(cc in add_these_columns){
+      ag2_long[[cc]] = 0
+    }  
+  }
+  
+  n_allele <- max(long_serum_coords$allele)
+  coord_names = long_serum_coords %>% select(matches('c\\d$')) %>% colnames()
+  fill_vec = numeric(length(coord_names)+1)
+  names(fill_vec) = c('iter', coord_names)
+  fill_vec['iter'] = NA
+  
+  # (print(long_antigen_coords))
+  # (print(long_serum_coords))
+  # (print(ag2_long))
   
   long_coords <- bind_rows(long_antigen_coords,
                            long_serum_coords,
-                           ag2_long)
+                           ag2_long)  %>%
+    complete(allele, kind, chain, fill = as.list(fill_vec)) ## Add 0 coordinates for the fixed antigen at the origin
   long_coords
 }
 
   
 extract_summary_coords <- function(stan_fit){
   summary_coords <- extract_long_coords(stan_fit) %>%
-    group_by(id, kind, chain) %>%
-    summarise(c1.10 = quantile(c1, .1),
-              c1 = median(c1),
-              c1.90 = quantile(c1, .9),
+    group_by(allele, kind, chain) %>%
+    summarise(c1.10 = quantile(c1, .1, na.rm = T),
+              c1 = median(c1, na.rm = T),
+              c1.90 = quantile(c1, .9, na.rm = T),
               c2.10 = quantile(c2, .1, na.rm = T),
               c2 = median(c2, na.rm = T),
               c2.90 = quantile(c2, .9, na.rm = T)) %>%
-    ungroup() %>%
-    bind_rows(tibble(id = 1,
-                     kind = 'fixed_ag1', chain = 1:4, c1.10 = NA, c1 = 0, c1.90 = NA, c2.10 = NA, c2 = 0, c2.90 = NA)) 
+    ungroup()
   summary_coords
 }
 
@@ -653,5 +690,45 @@ plot_compare_distance_tiles <- function(fitlist){
     geom_tile(aes(x = antigen, y = serum, fill = value))   +
     facet_wrap(.~name) +
     scale_fill_viridis_c()
+}
+
+
+## Write a function to compare distances that would have occurred with centroid solution
+centroid_counterfactual <- function(fitlist, 
+                                          centroid_weights,
+                                           antigen_coords){
+  
+  centroid_df <- get_weighted_centroids(antigen_coords, centroid_weights)
+  get_one_centroid_distance <- function(ag1, ag2){
+    v1 = c(centroid_df$c1[ag1], centroid_df$c2[ag1])
+    v2 = c(centroid_df$c1[ag2], centroid_df$c2[ag2])
+    get_euclidean_distance(v1, v2)
+  }
+  
+  distance_comparison <- fitlist$titer_map %>%
+    rowwise() %>%
+    mutate(centroid_distance = get_one_centroid_distance(ag1 = antigen, ag2 = serum)) %>%
+    ungroup() %>%
+    arrange(centroid_distance) %>%
+    mutate(distance_difference = titer_distance - centroid_distance) 
+  
+  tiles = distance_comparison %>% 
+    pivot_longer(contains('distance')) %>%
+    ggplot() + 
+    geom_tile(aes(x = antigen, y = serum, fill = value))   +
+    facet_wrap(.~name) +
+    scale_fill_viridis_c()
+  
+  sum_square_error = distance_comparison %>%
+    summarise(rs_error = sum((centroid_distance-titer_distance)^2))
+  
+  lineplot = ggplot(distance_comparison) +
+    geom_point(aes(x = (titer_distance), y = (centroid_distance), color = as.factor(antigen)), alpha = .3, size = 3) +
+    geom_abline(lty = 2, lwd = .5) +
+    theme(legend.position = c(.25, .75)) +
+    ggtitle(sprintf('sum square error is %2.2f', sum_square_error))
+  
+  cowplot::plot_grid(lineplot, tiles, nrow = 2)
+  
 }
   
