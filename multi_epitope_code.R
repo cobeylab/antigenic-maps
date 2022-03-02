@@ -471,32 +471,29 @@ extract_long_coords <- function(stan_fit){
   is_log_posterior = parname_contains(parnames, 'lp_')
   
   
-  ag_coords = raw_fits[,,is_antigen_coord]
-  serum_coords = raw_fits[,,is_serum_coord]
-  ag2_coords = raw_fits[,,parname_contains(parnames, 'ag2')]
+  # ag_coords = raw_fits[,,is_antigen_coord]
+  # serum_coords = raw_fits[,,is_serum_coord]
+  # ag2_coords = raw_fits[,,parname_contains(parnames, 'ag2')]
   
   #cat(print('checkpoint 1\n'))
-  long_antigen_coords <- apply(ag_coords, 2, function(xx){as_tibble(xx) %>% mutate(iter = 1:niter)}) %>%
+  long_antigen_coords <- lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_antigen_coord]) %>% mutate(iter = 1:niter)}) %>%
     bind_rows(.id = 'chain') %>%
-    extract(chain, 'chain', regex = 'chain:(\\d?)', convert = T) %>%
     mutate(kind = 'antigen') %>%
     pivot_longer(contains('antigen_coords'), names_to = c('allele', 'coordinate'), names_pattern = 'antigen_coords.(\\d+),(\\d+).', values_to = 'value') %>%
     mutate(allele = as.numeric(allele) + 2) %>%
     pivot_wider(id_cols = c(chain, iter, allele, kind), names_from = coordinate, names_prefix = 'c', values_from = value) 
   
   #cat(print('checkpoint 2\n'))
-  long_serum_coords <- apply(serum_coords, 2, function(xx){as_tibble(xx) %>% mutate(iter = 1:niter)}) %>%
+  long_serum_coords <- lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_serum_coord]) %>% mutate(iter = 1:niter)}) %>%
     bind_rows(.id = 'chain') %>%
-    extract(chain, 'chain', regex = 'chain:(\\d?)', convert = T) %>%
     mutate(kind = 'serum') %>%
     pivot_longer(contains('serum_coords'), names_to = c('allele', 'coordinate'), names_pattern = 'serum_coords.(\\d+),(\\d+).', values_to = 'value') %>%
     mutate(allele = as.numeric(allele)) %>%
     pivot_wider(id_cols = c(chain, iter, allele, kind), names_from = coordinate, names_prefix = 'c', values_from = value) 
   
   #cat(print('checkpoint 3\n'))
-  ag2_long <- apply(ag2_coords, 2, function(xx){as_tibble(xx) %>% mutate(iter = 1:niter)}) %>%
+  ag2_long <- lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,parname_contains(parnames, 'ag2')]) %>% mutate(iter = 1:niter)}) %>%
     bind_rows(.id = 'chain') %>%
-    extract(chain, 'chain', regex = 'chain:(\\d?)', convert = T) %>%
     rename(c1 = value) %>%
     mutate(allele = 2) %>%
     mutate(kind = 'antigen') %>%
@@ -531,13 +528,17 @@ extract_long_coords <- function(stan_fit){
 extract_summary_coords <- function(stan_fit){
   summary_coords <- extract_long_coords(stan_fit) %>%
     group_by(allele, kind, chain) %>%
-    summarise(c1.10 = quantile(c1, .1, na.rm = T),
-              c1 = median(c1, na.rm = T),
-              c1.90 = quantile(c1, .9, na.rm = T),
-              c2.10 = quantile(c2, .1, na.rm = T),
-              c2 = median(c2, na.rm = T),
-              c2.90 = quantile(c2, .9, na.rm = T)) %>%
-    ungroup()
+    summarise_at(.vars = vars(matches('c\\d+')), .funs = list(`.500` = median,
+                                                              `.025` = ~quantile(.x, probs = .025),
+                                                              `.100` = ~quantile(.x, probs = .025),
+                                                              `.900` = ~quantile(.x, probs = .025),
+                                                              `.975` = ~quantile(.x, probs = .025))) %>%
+    rename_with(.fn = ~gsub("_.500", "", .x, fixed = TRUE), .cols = contains('.500'))
+  if(ncol(summary_coords) == 8){
+    summary_coords <- summary_coords %>%
+      rename_with(.fn = ~gsub(".", "c1.", .x, fixed = TRUE), .cols = matches('\\d\\d\\d')) %>%
+      rename(c1 = c1.500)
+  }
   summary_coords
 }
 
