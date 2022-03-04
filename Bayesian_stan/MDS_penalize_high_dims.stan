@@ -24,19 +24,20 @@ model {
   ag2_coords[1] = ag2_c1;
 
   // prior on sigma
-  sigma ~ normal(0.3, 1.0);
+  // because sigma is 0-truncated, whis will be a diffuse half-normal
+  sigma ~ normal(0.0, 10.0);
 
   // priors on coordinate values
   // impose a prior of 0, with variance decreasing in higher dimensions (a higher penalty for non-0 params in higher dims)
   for(strain in 1:(n_antigens-2)){
     for(dim in 1:n_dim){
-      antigen_coords[strain][dim] ~ normal(0.0, 1/dim);
+      antigen_coords[strain][dim] ~ normal(0.0, 50.0/dim);
     }
   }
 
   for(serum in 1:n_sera){
     for(dim in 1:n_dim){
-      serum_coords[serum][dim] ~ normal(0.0, 1/dim);
+      serum_coords[serum][dim] ~ normal(0.0, 50.0/dim);
     }
   }
 
