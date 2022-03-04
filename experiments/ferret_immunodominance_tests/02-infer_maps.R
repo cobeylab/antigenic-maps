@@ -16,7 +16,6 @@ one_fit <- function(n_dim,
   
   nsera = unique(titer_map$serum) %>% length()
   nantigen = unique(titer_map$antigen) %>% length()
-  
   fit_stan_MDS(mod = '../../Bayesian_stan/MDS.stan',
                observed_distances = format_stan_inputs(titer_map),
                n_antigens = nsera,
