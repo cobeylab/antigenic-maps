@@ -47,28 +47,3 @@ model {
     }
   }
  }
-
- generated quantities {
-  real predicted_distances[n_antigens,n_sera]; // Model-predicted distances (accounting for monte carlo Gaussian observation error)
-  {
-    vector[n_dim] ag1_coords;
-    vector[n_dim] ag2_coords;
-    // set all ag1 coords to 0
-    ag1_coords = rep_vector(0.0, n_dim);
-    // ag2 c1 is a free par, and set all other coords to 0
-    ag2_coords = rep_vector(0.0, n_dim);
-    ag2_coords[1] = ag2_c1;
-
-  for (serum in 1:n_sera){
-    // ag1 
-    predicted_distances[1,serum] = distance(ag1_coords, serum_coords[serum]);
-    // ag2
-    predicted_distances[2,serum] = distance(ag2_coords, serum_coords[serum]);
-    for (strain in 3:n_antigens){
-      predicted_distances[strain,serum] = distance(antigen_coords[strain-2], serum_coords[serum]);
-    }
-   }
-  }
- }
-
-
