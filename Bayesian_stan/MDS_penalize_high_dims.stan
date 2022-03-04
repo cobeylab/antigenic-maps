@@ -38,6 +38,9 @@ transformed parameters{
 }
 
 model {
+  // prior on sigma
+  sigma ~ normal(1.0, 1.0);
+  
   // priors on coordinate values
   // impose a prior of 0, with variance decreasing in higher dimensions (a higher penalty for non-0 params in higher dims)
   for(strain in 1:(n_antigens-2)){
