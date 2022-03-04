@@ -39,7 +39,7 @@ transformed parameters{
 
 model {
   // prior on sigma
-  sigma ~ normal(0.0, 100.0);
+  sigma ~ normal(1.0, 1.0);
 
   for (serum in 1:n_sera){
     for (strain in 1:n_antigens){
