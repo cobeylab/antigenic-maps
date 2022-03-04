@@ -815,7 +815,9 @@ get_map_error_df <- function(stan_fit,
           by = c('serum', 'antigen')) %>%
     arrange(serum, antigen, chain, iter) %>%
     group_by(antigen, serum) %>%
-    summarise(pairwise_error = mean(sqrt( (map_distance-titer_distance)^2 ))) %>%
+    summarise(map_distance = mean(map_distance),
+              titer_distance = unique(titer_distance),
+              pairwise_error = mean(sqrt( (map_distance-titer_distance)^2 ))) %>%
     ungroup()
 }
 

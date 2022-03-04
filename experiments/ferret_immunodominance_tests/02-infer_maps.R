@@ -39,6 +39,7 @@ even_fit_list <- foreach(this_ndim = 1:8) %do% {
           idstring = 'even')
 }
 names(even_fit_list) = paste0(1:8, 'D')
+write_rds(even_fit_list, 'even_fit_list.rds')
 
 
 
@@ -52,6 +53,7 @@ skewed_fit_list <- foreach(this_ndim = 1:8) %do% {
           idstring = 'skewed')
 }
 names(skewed_fit_list) = paste0(1:8, 'D')
+write_rds(skewed_fit_list, 'skewed_fit_list.rds')
 
 
 
@@ -66,6 +68,7 @@ E1_fit_list <- foreach(this_ndim = 1:8) %do% {
           idstring = 'E1')
 }
 names(E1_fit_list) = paste0(1:8, 'D')
+write_rds(E1_fit_list, 'E1_fit_list.rds')
 
 
 
@@ -80,6 +83,7 @@ E2_fit_list <- foreach(this_ndim = 1:8) %do% {
           idstring = 'E2')
 }
 names(E2_fit_list) = paste0(1:8, 'D')
+write_rds(E2_fit_list, 'E2_fit_list.rds')
 
 
 
@@ -93,11 +97,6 @@ E3_fit_list <- foreach(this_ndim = 1:8) %do% {
           idstring = 'E3')
 }
 names(E3_fit_list) = paste0(1:8, 'D')
-
-
-
-write_rds(even_fit_list, 'even_fit_list.rds')
-write_rds(skewed_fit_list, 'skewed_fit_list.rds')
-write_rds(E1_fit_list, 'E1_fit_list.rds')
-write_rds(E2_fit_list, 'E2_fit_list.rds')
 write_rds(E3_fit_list, 'E3_fit_list.rds')
+
+

@@ -57,7 +57,35 @@ return(list(inputs = inputs,
 even_list <- parse_fits(fitname = 'even')
 skewed_list <- parse_fits('skewed')
 E1_list <- parse_fits(fitname = 'E1')
+E2_list <- parse_fits(fitname = 'E2')
+E3_list <- parse_fits(fitname = 'E3')
 ```
+
+## Verify that the E1 2D fit reproduces the underlying E1 map
+```{r}
+ggplot() +
+  geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data =E1_list$inputs$ag_ab_coords%>% filter(epitope==1))+
+    geom_point(aes(x = c1, y = c2, color = as.factor(allele), shape = kind), alpha = .5, data = E1_list$fits_summary[[2]]) +
+  ggtitle('E1 dominant 2D fit')
+```
+
+```{r}
+ggplot() +
+  geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data =E2_list$inputs$ag_ab_coords%>% filter(epitope==2))+
+    geom_point(aes(x = c1, y = c2, color = as.factor(allele), shape = kind), alpha = .5, data = E2_list$fits_summary[[2]]) +
+  ggtitle('E2 dominant 2D fit')
+```
+
+```{r}
+ggplot() +
+  geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data =E3_list$inputs$ag_ab_coords%>% filter(epitope==3))+
+    geom_point(aes(x = c1, y = c2, color = as.factor(allele), shape = kind), alpha = .5, data = E3_list$fits_summary[[2]]) +
+  ggtitle('E3 dominant 2D fit')
+```
++ is the true coordinate, and the colored points are the estimates.
+
+
+
 
 ## Plot errors
 ```{r}
@@ -83,8 +111,8 @@ This is unexpected. Instead, I thought that the error would approach an asymptot
 
 Some hypotheses for why we see the error increase so much as the dimensionality increases:
 
-1. Maybe the monte-carlo error adds up as dimensionality increases?
-2. Since this is posterior (integrated) error, maybe increasing uncertainty in higher dimensions leads to greater posterior predictive error, but flat median error?
+1. Since this is posterior (integrated) error, maybe increasing uncertainty in higher dimensions leads to greater posterior predictive error, but flat median error?
+2. Maybe lack of identifiability in higher dimensions is interfering with the fit.
 
 
 ## Verify that pairwise error increases with dimensionality
@@ -92,7 +120,7 @@ Some hypotheses for why we see the error increase so much as the dimensionality 
 ```{r}
 plot_error_by_point <- function(parsed_list){
   parsed_list$errors_df %>%
-  mutate(`map-observed distance` = predicted_map_distance-observed_distance) %>%
+  mutate(`map-observed distance` = map_distance-titer_distance) %>%
   ggplot() +
   geom_point(aes(x = antigen, y = `map-observed distance`, color = dimensions), alpha = .5) +
   geom_hline(aes(yintercept = 0), lty = 2)+
@@ -116,13 +144,11 @@ plot_error_by_point(E1_list) +
   ggtitle('E1 fits')
 ```
 
-# Hypothesis 1 - monte carlo error adds up in higher dimensions
+# Hypothesis 1 - uncertaintly increases with greater numbers of dimensions, leading to greater posterior map error
 
-The likelihood assumes <img src="https://latex.codecogs.com/svg.image?d_{predicted}&space;\sim&space;\mathcal{N}(d_{map},&space;\sigma)" title="d_{predicted} \sim \mathcal{N}(d_{map}, \sigma)" />.
+The likelihood assumes $d_{predicted \sim \mathcal{N}(d_{map},\sigma$.
 
-So the predictions include Monte Carlo error, whose magnitude depends on the inferred value of sigma. 
-
-Let's look at the sigma estimates:
+Sigma estimates increase as we move from 2D to higher dimensions, indicating that the model is (for some reason) willing to tolerate greater map error in high dimensions.
 
 ```{r}
 ## Monte carlo error depends on the standard deviation
@@ -151,63 +177,6 @@ sigma_results %>%
   geom_segment(aes(x = dimensions+xjitter, xend = dimensions+xjitter, y = `2.5%`, yend = `97.5%`, color = kind)) +
   ggtitle('sigma estimates')
 ```
-
-Ok, so it's definitely true that sigma estimates are growing as dimensionality increases, and that this could contribute to monte carlo error.
-
-Let's estimate how much Monte Carlo error we're dealing with due to sigma.
-
-For a given antigen-serum pair, the error is calculated as:
-  $mean( \sqrt(d_{pred,i} - d_{titer})^2 )$, were $d_{pred,i}$ is the predicted distance at sample i of the posterior
-  and $d_{pred,i} \sim \mathcal{N}(d_{map,i}, \sigma)$.
-    
-  Let's assume optimistically that $d_{map,i} = d_{titer}$ for all iterations in the posterior
-  Then, the Monte Carlo error at sapmle i is:
-   $M_i = |X|$, where $X \sim \mathcal{N}(0,\sigma)$
-  And the overall pairwise monte carlo error is:
-   $M = mean(abs(X))$
-   
-  Finally, we have to sum across all pairs in the analysis:
-    map monte carlo error = $\sum_{antigen, serum}(M)$
-
-```{r}
-estimate_monte_carlo_error <- function(mean_sigma,
-                                       niter,
-                                       n_ag,
-                                       n_sera){
-
-  
-  replicate(n = n_ag*n_sera, expr = {
-    ## For each ag-serum pair, draw pairwise error
-    M_i = abs(rnorm(niter, mean = 0, sd = mean_sigma))
-    mean(M_i)
-  }
-  ) %>%
-    sum()
-
-  }
-```
-
-
-
-
-```{r}
-sigma_results %>%
-  rowwise() %>%
-  mutate(monte_carlo_error = estimate_monte_carlo_error(mean, 2500, 5, 5)) %>%
-  ungroup() %>%
-  select(kind, dimensions, mean, monte_carlo_error) %>%
-  rename(mean_sigma = mean) %>%
-  merge(these_errors) %>%
-  rename(map_error = error) %>%
-  pivot_longer(contains('error')) %>%
-  ggplot() +
-    geom_point(aes(x = dimensions, y = value, color = kind, lty = name)) +
-    geom_line(aes(x = dimensions, y = value, color = kind, lty = name)) +
-    ggtitle('error sources')
-```
-
-
-### Ok, the plot above shows that Monte Carlo error is a huge contributor to error in higher dimensions, and that higher sigma estimates in higher dimensions drive the increase in monte carlo predictive error with increasing dimensions.
 
 
 # Hypothesis 2 - median error plaueaus, but posterior error increases due to incerasing uncertainty in higher dimensions.
@@ -271,10 +240,26 @@ c. Allowing for higher dimensions does NOT allow us to infer the even map more a
 
 ```{r}
 get_par_summaries(even_list) %>%
-  filter(grepl(pattern = 'predicted', x = parameter)) %>%
+  filter(grepl(pattern = 'map', x = parameter)) %>%
   ggplot() +
   geom_point(aes(x = dimensions, y = sd), alpha = .5) +
   ggtitle('sd of predicted distances')
+
+# 
+# get_par_summaries(even_list) %>%
+#   filter(grepl(pattern = 'map', x = parameter)) %>%
+#   select(dimensions, mean, sd, parameter) %>%
+#   merge(get_par_summaries(even_list) %>%
+#           filter(parameter == 'sigma'),
+#           by = c('dimensions'), suffixes = c('.distances', '.sigma')) -> test
+#   
+# test %>%
+#   ggplot() +
+#   geom_point(aes(x = dimensions, y = sd.distances), color = 'blue', alpha = .5)+
+#   geom_point(aes(x = dimensions, y = mean.sigma), alpha = .5)
+# 
+# test %>% select(dimensions, contains('sd'), contains('sigma')) %>%
+#   mutate(sq_sd_sigma = sqrt(mean.sigma))
 ```
 
 ## 3. How do the mean estimated distances change with dimensionality?
@@ -282,8 +267,8 @@ get_par_summaries(even_list) %>%
 ```{r}
 plot_distance_predictions <- function(parsed_fits){
   get_par_summaries(parsed_fits) %>%
-    filter(grepl('predicted', x = parameter)) %>%
-    extract(parameter, into = c('antigen', 'serum'), regex = 'predicted_distances.(\\d+),(\\d+).$') %>%
+    filter(grepl('map', x = parameter)) %>%
+    extract(parameter, into = c('antigen', 'serum'), regex = 'map_distances.(\\d+),(\\d+).$') %>%
     ggplot() +
     geom_point(aes(x = dimensions, y = mean, color = dimensions)) +
     geom_segment(aes(x = dimensions, xend = dimensions, y = `2.5%`, yend = `97.5%`, color = dimensions))+
@@ -291,59 +276,12 @@ plot_distance_predictions <- function(parsed_fits){
 }
 
 plot_distance_predictions(even_list) +
-  ggtitle('predicted distances -- even immunodominance')
+  ggtitle('map distances -- even immunodominance')
 ```
 ### I'm not sure how much to make of this. It shows that the mean, and sd of predicted distances increases with dimensionality, but above we showed that this is at least partially due to monte carlo error.
 
 
 
-## 5. How does the posterior mean error change with dimensionality?
-
-Define posterior mean error as:
-  $\sum \sqrt(d_{mean} - d_{titer})^2$, where $d_{mean}$ is the Euclidean distance between $x_{i,mean}$ and $y_{j,mean}$ where $x_{i,mean}$ is the posterior mean serum coordinate and $y_{j,mean}$ is the posterior mean antigen coordinate.
-  
-```{r}
-
-get_posterior_mean_error <- function(parsed_fits){
-posterior_medians <- get_par_summaries(parsed_fits) %>%
-  mutate(parameter = ifelse(parameter == 'ag2_c1', 'antigen_coords[0,1]', parameter)) %>%
-  filter(grepl('coords', x = parameter)) %>%
-  extract(parameter, into = c('kind', 'allele', 'coordinate'), regex = '(\\w+)_coords.(\\d+),(\\d+).$') %>%
-  mutate(allele = ifelse(kind == 'antigen', as.numeric(allele)+2, as.numeric(allele)))  %>%
-  select(kind, allele, coordinate, mean, dimensions) %>%
-  complete(kind, allele, coordinate, dimensions, fill = list(mean = 0))
-
-get_one_distance <- function(this.antigen, this.serum, this.dimension){
-  this_ag_coords = posterior_medians %>%
-    filter(allele == this.antigen, kind == 'antigen', dimensions == paste0(this.dimension, 'D'), coordinate <= this.dimension) %>%
-    pull(mean) 
-  
-  this_serum_coords = posterior_medians %>%
-    filter(allele == this.serum, kind == 'serum', dimensions == paste0(this.dimension, 'D'), coordinate <= this.dimension) %>%
-    pull(mean) 
-  
-  get_euclidean_distance(this_ag_coords, this_serum_coords)
-}
-
-pairwise_errors <- parsed_fits$inputs$titer_map %>%
-  expand_grid(dimension = 1:8) %>%
-  rowwise() %>%
-  mutate(posterior_mean_distance = get_one_distance(this.serum = serum, this.antigen = antigen, this.dimension = dimension),
-         pairwise_error = sqrt( (titer_distance - posterior_mean_distance)^2 ))
-}
-```
-
-
-```{r}
-bind_rows(list(even = get_posterior_mean_error(even_list),
-               skewed = get_posterior_mean_error(skewed_list),
-               E1_dominant = get_posterior_mean_error(E1_list)),
-          .id = 'case') %>%
-  group_by(dimension, case) %>%
-  summarise(posterior_mean_map_error = sum(pairwise_error)) %>%
-  ggplot() +
-  geom_point(aes(x = dimension, y = posterior_mean_map_error, color = case))
-```
 
 
 ## Ok, the posterior mean map error increases with dimension too. 
@@ -395,4 +333,5 @@ These identifiability issues aren't apparent in higher dimensions, but this may 
 ![even immunodominance - 6D pairs plot](pairs/even_6D.png)
 
 ![even immunodominance - 8D pairs plot](pairs/even_8D.png)
+
 
