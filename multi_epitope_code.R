@@ -810,7 +810,7 @@ get_map_error_df <- function(stan_fit,
   
   lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_prediction]) %>% mutate(iter = 1:niter)}) %>%
     bind_rows(.id = 'chain') %>%
-    pivot_longer(contains('map'), names_to = c('antigen', 'serum'), names_pattern = 'map_distances(\\d+),(\\d+).', values_to = 'map_distance') %>%
+    pivot_longer(contains('map'), names_to = c('antigen', 'serum'), names_pattern = 'map_distances.(\\d+),(\\d+).', values_to = 'map_distance') %>%
     merge(titer_map, 
           by = c('serum', 'antigen')) %>%
     arrange(serum, antigen, chain, iter) %>%
