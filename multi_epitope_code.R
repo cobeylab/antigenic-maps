@@ -793,4 +793,37 @@ centroid_counterfactual <- function(fitlist,
   cowplot::plot_grid(lineplot, tiles, nrow = 2)
   
 }
+
+
+
+get_map_error_df <- function(stan_fit,
+                             titer_map){
+  raw_fits <- rstan::extract(stan_fit, permuted = F, inc_warmup = F)
+  niter <- dim(raw_fits)[1]
+  nchains <- dim(raw_fits)[2]
+  
+  parnames = dimnames(raw_fits)[3]
+  parname_contains <- function(parnames, this_pattern){sapply(parnames, function(xx) grepl(pattern = this_pattern, x = xx)) %>% as.vector()}
+  is_prediction = parname_contains(parnames, 'predicted')
+  
+  
+  lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_prediction]) %>% mutate(iter = 1:niter)}) %>%
+    bind_rows(.id = 'chain') %>%
+    pivot_longer(contains('predicted'), names_to = c('antigen', 'serum'), names_pattern = 'predicted_distances.(\\d+),(\\d+).', values_to = 'predicted_distance') %>%
+    merge(titer_map, 
+          by = c('serum', 'antigen')) %>%
+    arrange(serum, antigen, chain, iter) %>%
+    group_by(antigen, serum) %>%
+    summarise(pairwise_error = mean(sqrt( (predicted_distance-titer_distance)^2 ))) %>%
+    ungroup()
+}
+
+get_map_error <- function(stan_fit, 
+                          titer_map){
+  get_map_error_df(stan_fit,
+                   titer_map) %>%
+    ungroup() %>%
+    summarise(map_error = sum(pairwise_error), .groups = 'drop') %>%
+    pull(map_error)
+}
   
