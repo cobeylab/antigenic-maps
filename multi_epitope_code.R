@@ -217,6 +217,7 @@ fit_stan_MDS <- function(
                           chains = chains, 
                           init = initfun,
                           iter = niter,
+                          cores = min(6, chains),
                           control = list(adapt_delta = 0.89,
                                          max_treedepth = 14),
                           diagnostic_file = diagnostic_file
