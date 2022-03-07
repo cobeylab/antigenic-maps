@@ -69,21 +69,6 @@ ggplot() +
   ggtitle('E1 dominant 2D fit')
 ```
 
-```{r}
-ggplot() +
-  geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data =E2_list$inputs$ag_ab_coords%>% filter(epitope==2))+
-    geom_point(aes(x = c1, y = c2, color = as.factor(allele), shape = kind), alpha = .5, data = E2_list$fits_summary[[2]]) +
-  ggtitle('E2 dominant 2D fit')
-```
-
-```{r}
-ggplot() +
-  geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data =E3_list$inputs$ag_ab_coords%>% filter(epitope==3))+
-    geom_point(aes(x = c1, y = c2, color = as.factor(allele), shape = kind), alpha = .5, data = E3_list$fits_summary[[2]]) +
-  ggtitle('E3 dominant 2D fit')
-```
-+ is the true coordinate, and the colored points are the estimates.
-
 
 
 
