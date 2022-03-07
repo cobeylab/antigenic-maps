@@ -48,6 +48,11 @@ model {
       antigen_coords[strain][dim] ~ normal(0.0, 50.0/dim);
     }
   }
+  for(serum in 1:n_sera){
+    for(dim in 1:n_dim){
+      serum_coords[serum][dim] ~ normal(0.0, 50.0/dim);
+    }
+  }
 
   for (serum in 1:n_sera){
     for (strain in 1:n_antigens){
