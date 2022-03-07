@@ -93,19 +93,24 @@ these_errors <- bind_rows(even_list$errors,
           skewed_list$errors,
           E1_list$errors) 
 
+error_plot <- these_errors %>%
+  ggplot(aes(x = dimensions, y = error, color = kind)) +
+  geom_point() +
+  geom_line() 
+
+
 cowplot::plot_grid(
-these_errors %>%
-  ggplot(aes(x = dimensions, y = error, color = kind)) +
-  geom_point() +
-  geom_line(),
-
-
-these_errors%>%
-  filter(dimensions < 5) %>%
-  ggplot(aes(x = dimensions, y = error, color = kind)) +
-  geom_point() +
-  geom_line()
+  cowplot::plot_grid(
+    error_plot +
+  theme(legend.position = 'none'),
+    error_plot + xlim(c(1, 4)) +
+  theme(legend.position = 'none')
+  ),
+  cowplot::get_legend(error_plot + theme(legend.position = 'bottom') + guides(color = guide_legend('immunodominance'))),
+  nrow = 2,
+  rel_heights = c(5, 1)
 )
+ggsave('error_plot.png', width = 7, height = 4, units = 'in', dpi = 300)
 ```
 This is unexpected. Instead, I thought that the error would approach an asymptote as dimensions increase. A map of dimension n+1 can always do at least as well as the best-fit map of dimension n, by matching the coordinates of dimension 1:n, and setting all coordinates in dimension n+1 = 0.
 
