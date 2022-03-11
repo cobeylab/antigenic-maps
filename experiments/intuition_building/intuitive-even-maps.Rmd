@@ -1,0 +1,289 @@
+---
+title: "Muti epitope maps -- ferrets"
+output: html_notebook
+---
+
+
+## Goal - build intuition for what we expect when we infer the map assuming even immunodominance
+
+**Approach**
+
+1. Define distance measures in which we can predict easily what the map will look like
+2. Study how the titer distance chanes in comparison to these intuitive measures
+
+**Metrics**
+
+1. Weighted average - $d^{map}_{ij} = \sum_e d_{ij}^{(e)}w_e$, where $\sum_e w_e = 1$, and $w_e$ represents immunodominance.
+    
+    * Expectation - map will reflect the weighted epitope-specific centroids.
+    * Map error will be minimal.
+    
+2. Min distances - $d^{map}_{ij} = min(d_{ij}^{(e)})$
+
+    * Expectation - map will reflect the max pairwise distances between epitopes.
+    * Map error will be higher -- it's not clear that there's an exact solution here
+    
+3. Actual titer model -- 
+  
+    How does titer distance relate to average distnace, or to max distance?
+
+
+
+```{r}
+source('../../multi_epitope_code.R')
+source('../../code.R')
+library('foreach')
+
+
+n_antigens = 20
+n_ab = 0
+n_chains = 4
+n_iter = 5000 # half will be burn in
+n_epitopes = 3
+
+outdir = 'ferret_immunodominance_tests'
+if(!dir.exists(outdir)) dir.create(outdir)
+```
+
+## Generate antigen coordinates. Each antigen consists of 3 epitopes.
+```{r}
+set.seed(13)
+antigen_coords <- tibble(epitope = rep(c(1:n_epitopes), each = n_antigens),
+                         antigen = rep(1:n_antigens, n_epitopes),
+                         kind = 'antigen',
+                         c1 = generate_ag_coords_random(n_antigens, n_epitopes),
+                         c2 = generate_ag_coords_random(n_antigens, n_epitopes)) %>%
+  mutate(epitope = as.factor(epitope),
+         antigen = as.factor(antigen))
+
+
+## Standardize so that Ag1 epitope 1 is at the origin and Ag2 epitope 1 is on the x-axis
+shifted_coords <-  standardize_coordinates(coord_mat = antigen_coords %>% select(starts_with('c')) %>% as.matrix(), ag1_row = 1, ag2_row = 2) %>%
+  as_tibble() %>%
+  set_names(c('c1', 'c2'))
+
+antigen_coords$c1 = shifted_coords$c1
+antigen_coords$c2 = shifted_coords$c2
+
+write_csv(antigen_coords, paste0(outdir, '/antigen_coords.csv'))
+```
+
+## Plot the coordinates
+```{r}
+antigen_coords %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, color = antigen, shape = epitope)) +
+  geom_polygon(aes(x = c1, y = c2, fill = antigen), alpha = .2)
+ggsave(filename = paste0(outdir, '/epitope_coords_polygon.png'))
+```
+
+```{r}
+antigen_coords %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, color = antigen, shape = epitope)) +
+  facet_wrap(.~epitope)
+ggsave(filename = paste0(outdir, '/epitope_coords_grid.png'))
+```
+
+## Weighted average distance matrices
+```{r}
+get_one_epitope_distances <- function(this.epitope){
+  this.coordmat = antigen_coords  %>% filter(epitope == this.epitope) %>% select(starts_with('c')) %>% as.matrix()
+  get_ab_ag_distances(ab_coords = this.coordmat,
+                                            ag_coords = this.coordmat) %>%
+    as.tibble() %>%
+    mutate(epitope = this.epitope, 
+           antigen = 1:nrow(.)) %>%
+    pivot_longer(-c(antigen, epitope), names_to = 'serum', names_prefix = 'ab', values_to = 'distance') %>%
+    mutate(serum = as.integer(serum))
+}
+
+epitope_distances <- lapply(1:n_epitopes, get_one_epitope_distances) %>% bind_rows()
+```
+
+
+```{r}
+weighted_avg_distance_map <- epitope_distances %>%
+  group_by(antigen, serum) %>%
+  summarise(mean_distance = mean(distance),
+            skewed_weighted_distance = sum(distance * c(1+2/3, 1, 1/3)/3),
+            max_distance = max(distance),
+            min_distance = min(distance),
+            dist_variance = var(distance))
+weighted_avg_distance_map
+```
+
+
+## Generate a serum with one Ab per epitope
+```{r}
+simple_serum = generate_ferret_inputs(antigen_coords = antigen_coords, 
+                                      relative_immunodominance = c(1,1,1), 
+                                      n_epitopes = 3, 
+                                      n_antigens = n_antigens,
+                                      n_abs_per_serum = 3, 
+                                      sigma = .01)
+
+```
+
+## Explore the relationships between map distance and titer distance
+```{r}
+simple_serum$titer_map %>%
+  merge(weighted_avg_distance_map) %>%
+  arrange(min_distance) %>%
+  ggplot() +
+  geom_text(aes(x = titer_distance, y = min_distance, color = dist_variance, label = serum)) +
+  geom_abline()+
+  ggtitle('Correlation between titer distance and min epitope distance')
+```
+
+```{r}
+simple_serum$titer_map %>%
+  merge(weighted_avg_distance_map) %>%
+  arrange(min_distance) %>%
+  ggplot() +
+  geom_text(aes(x = titer_distance, y = mean_distance, color = dist_variance, label = serum)) +
+  geom_abline()+
+  ggtitle('Correlation between titer distance and average epitope distance')
+```
+
+
+```{r}
+simple_serum$titer_map %>%
+  merge(weighted_avg_distance_map) %>%
+  arrange(min_distance) %>%
+  ggplot() +
+  geom_text(aes(x = titer_distance, y = max_distance, color = dist_variance, label = serum)) +
+  geom_abline()+
+  ggtitle('Correlation between titer distance and max epitope distance')
+```
+
+
+
+## Plot expectations
+
+```{r}
+antigen_coords %>%
+  group_by(antigen) %>%
+  mutate(mean_c1 = mean(c1),
+         mean_c2 = mean(c2)) %>%
+  arrange(antigen) %>%
+  ggplot() +
+#  geom_point(aes(x = c1, y = c2, color = antigen, shape = epitope)) +
+  geom_polygon(aes(x = c1, y = c2, fill = antigen), alpha = .2)+
+  geom_point(aes(x = mean_c1, y = mean_c2, color = antigen), pch = 7)+
+  ggtitle('Expected mean distance map')
+```
+```{r}
+antigen_coords %>%
+  group_by(antigen) %>%
+  mutate(weighted_c1 = sum(c1*weights),
+         weighted_c2 = sum(c2*weights)) %>%
+  arrange(antigen) %>%
+  ggplot() +
+#  geom_point(aes(x = c1, y = c2, color = antigen, shape = epitope)) +
+  geom_polygon(aes(x = c1, y = c2, fill = antigen), alpha = .2)+
+  geom_point(aes(x = weighted_c1, y = weighted_c2, color = antigen), pch = 7)+
+  ggtitle('Expected weighted mean distance map')
+```
+
+
+```{r}
+min_distance_df <- epitope_distances %>%
+  filter(antigen != serum) %>%
+  group_by(antigen, serum) %>%
+  filter(distance == min(distance)) %>%
+  merge(antigen_coords, by = c('epitope', 'antigen'), all.x = T, all.y = F) %>%
+  rename(c1_ag = c1, 
+         c2_ag = c2) %>%
+  merge(antigen_coords %>% rename(serum = antigen),
+        by = c('epitope', 'serum'), all.x = T, all.y = F) %>%
+  rename(c1_ab = c1, 
+         c2_ab = c2)
+
+all_distance_df <- epitope_distances %>%
+   merge(antigen_coords, by = c('epitope', 'antigen'), all.x = T, all.y = F) %>%
+  rename(c1_ag = c1, 
+         c2_ag = c2) %>%
+  merge(antigen_coords %>% rename(serum = antigen),
+        by = c('epitope', 'serum'), all.x = T, all.y = F) %>%
+  rename(c1_ab = c1, 
+         c2_ab = c2)
+  
+
+ggplot() +
+  geom_text(aes(x = c1, y = c2, color = antigen, label = epitope), data = antigen_coords)+
+  geom_text(aes(x = c1, y = c2, color = serum, label = epitope), data = antigen_coords %>% rename(serum = antigen) )+
+  geom_segment(aes(x = c1_ag, y = c2_ag, xend = c1_ab, yend = c2_ab, color = as.factor(serum)), data = all_distance_df)+
+  geom_segment(aes(x = c1_ag, y = c2_ag, xend = c1_ab, yend = c2_ab), data = min_distance_df)+
+  facet_grid(antigen~serum, labeller = label_both) +
+  ggtitle('Expected min distance map')
+```
+
+
+
+```{r}
+antigen_coords %>%
+  group_by(antigen) %>%
+  mutate(mean_c1 = mean(c1),
+         mean_c2 = mean(c2)) %>%
+  arrange(antigen) %>%
+  ggplot() +
+#  geom_point(aes(x = c1, y = c2, color = antigen, shape = epitope)) +
+  geom_polygon(aes(x = c1, y = c2, fill = antigen), alpha = .2)+
+  geom_point(aes(x = mean_c1, y = mean_c2, color = antigen), pch = 7)+
+  ggtitle('Expected mean distance map')
+```
+
+
+
+## Generate sera and titer inputs
+
+
+```{r}
+even_immunodominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(1, 1, 1), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 10, 
+                                                      sigma = .01)
+```
+
+
+
+
+
+```{r}
+E1_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(3, 0, 0), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 10, 
+                                                      sigma = .01)
+```
+
+```{r}
+E2_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(0, 3, 0), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 10, 
+                                                      sigma = .01)
+```
+
+```{r}
+E3_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords, 
+                                                      relative_immunodominance = c(0, 0, 3), 
+                                                      n_epitopes = 3, 
+                                                      n_antigens = 5, 
+                                                      n_abs_per_serum = 10, 
+                                                      sigma = .01)
+```
+
+## Save inputs
+```{r}
+write_rds(even_immunodominance_inputs, paste0(outdir, '/even_immunodominance_inputs.rds'))
+write_rds(skewed_immunodominance_inputs, paste0(outdir, '/skewed_immunodominance_inputs.rds'))
+write_rds(E1_complete_dominance_inputs, paste0(outdir, '/E1_complete_dominance_inputs.rds'))
+write_rds(E2_complete_dominance_inputs, paste0(outdir, '/E2_complete_dominance_inputs.rds'))
+write_rds(E3_complete_dominance_inputs, paste0(outdir, '/E3_complete_dominance_inputs.rds'))
+```
