@@ -24,7 +24,12 @@ transformed parameters{
 
 model {
   // assume c1 of Ag1 is 0 to help make the map identifiable
-  antigen_coords[1][1] ~ normal(0.0, 0.1)
+  antigen_coords[1][1] ~ normal(0.0, 0.1); // Fig ag1 coordinates 1 and 2 to the origin
+
+  if(n_dim > 1){
+    antigen_coords[1][2] ~ normal(0.0, 0.1);
+    antigen_coords[2][2] ~ normal(0.0, 0.1); // If 2D+, fix ag2 to the x axis
+    }
 
   // Prior on sigma --
   // Assume sigma is relatively low. Else sigma grows to infinity to make the observation model permissible.
