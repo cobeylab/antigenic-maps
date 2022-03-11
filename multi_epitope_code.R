@@ -137,7 +137,7 @@ r # Maximum log2 titer
     }
     ## This function calculates each factor and takes the product to solve for titer
     factors<-mapply(FUN = one_factor, ab_positions = ab_position_list, x_ag = ag_list, this_immunodominance = relative_concentrations, z = z, alpha = alpha, r = r)  
-    #cat(print('\n'))
+    # cat(print('\n'))
     # cat(print('factors are\n'))
     # print(factors)
     prod(factors) - 1/2
