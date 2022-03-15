@@ -1,0 +1,73 @@
+---
+title: "What is a dimension"
+output: html_notebook
+---
+
+## In an antigenic map, what is a dimension?
+
+
+Immagine a set of 5 strains, labeled a:d.
+Immagine that the coordinate positions of these strains represent their antigenic phenotype.
+Each unit of Euclidean distance between two strains represents one unit difference in log2 titer.
+
+Now, immagine that strain d mutates to become a new strain, e, which falls 1 distance unit away from d.
+
+**In a 1D map**, a 1-unit mutation implies that for all strains in the panel, the titer to e is exactly 1 units greater or 1 units less than the titer to d.
+
+
+```{r}
+df_1d <- tibble(strain = c('a', 'b', 'c', 'd'),
+                x1 = c(1, 2, 3, 4),
+                color_index = as.character(c(1,1,1,1)))
+ggplot(df_1d) +
+  geom_hline(aes(yintercept = 0))+
+  geom_label(aes(x = x1, y = 0, color = color_index, label = strain), show.legend = F) +
+  theme(axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        axis.text.y = element_blank()) +
+  ylab('') +
+  geom_segment(aes(x = 4, xend = 4.95, y = .01, yend = .01), arrow = arrow(), color = 'cadetblue3') +
+  geom_segment(aes(x = 4, xend = 3.05, y = .02, yend = .02), arrow = arrow(), color = 'cadetblue3') +
+  geom_text(aes(x = 5, y = .01, label = 'e'), color = 'cadetblue3') +
+  geom_text(aes(x = 3, y = .02, label = 'e'), color = 'cadetblue3') +
+  ylim(c(0, .05)) +
+  ggtitle('1D map:\nTwo possible locations for e')
+```
+
+
+
+Now, immagine that strain e falls 3 units from d, but only 0.2 units from b. In other words, the mutation dramatically changed the titer to d, but had little effect on the titer to strain b. 
+
+It is not possible to represent this change in a 1D map.
+
+But if we add another dimension, we can represent a mutation that has different effects on the titer to specific strains.
+
+The intesection of two cirles, one centered at d with radius 3, and one centered at b with radius 0.2, represent possible locations for e:
+
+
+```{r}
+df_2d <- tibble(strain = c('a', 'b', 'c', 'd'),
+                x1 = c(1, 2, 3, 4),
+                x2 = c(3.07, 2.6, 2.75, 0.25),
+                color_index = as.character(c(1,1,1,1)))
+ggplot(df_2d) +
+  geom_label(aes(x = x1, y = x2, color = color_index, label = strain), show.legend = F) +
+  ylim(c(-3, 4)) + xlim(c(0,7)) +
+  ggforce::geom_circle(aes(x0 = 4, y0 = .25, r = 3), lty = 2) +
+  ggforce::geom_circle(aes(x0 = 2, y0 = 2.6, r = .2), lty = 2) +
+  geom_point(aes(x = 1.9, y = 2.4), color = 'greenyellow', size = 2) +
+  geom_point(aes(x = 2.2, y = 2.6), color = 'greenyellow', size = 2) +
+ggtitle('2D map:\nTwo possible locations for e')
+```
+
+
+Following on this logic, if e is 3 units from d, 0.2 units from b, and 1 unit from c, then we need a 3rd dimension to account for the fact that e is close to b, but far from c.
+
+Overall, the extent to which the pairwise distances between strains covary is related to the number of dimensions.
+
+
+
+
+
+ 
+
