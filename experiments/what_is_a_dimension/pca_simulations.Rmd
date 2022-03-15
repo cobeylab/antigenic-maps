@@ -1,0 +1,102 @@
+---
+title: "Dimension reduction sandbox"
+output: html_notebook
+---
+
+Before running PCR on simulated titers, try running it on an idealized distnace matrix that we expect to reduce to 1D. 
+
+## Write out the 1D model
+
+* $z_{ik}$ titer between strain i and serum k
+* $x_i$ is the D1 coordinate of strain i
+* c is a constant scaling the decrease in log2 titer with distance
+
+
+$z_{ik} = z^{max}_k - c(\sqrt(x_i-x_k)^2)$
+
+## Simulate 1d titers
+```{r}
+z_max = 10
+get_one_titer_1D <- function(z_max, xi, xk, c = 1){
+  z_max - sqrt((xi-xk)^2)
+}
+
+titer_df_1D <- expand_grid(x_strain = 1:10,
+            x_serum = 1:10) %>%
+  rowwise() %>%
+  mutate(titer = get_one_titer_1D(10, x_strain, x_serum))
+
+titer_mat_1D = matrix(titer_df$titer, nrow = 10, ncol = 10, byrow = F, dimnames = list(paste0('strain', 1:10), paste0('serum', 1:10)))
+```
+
+## Perform PCA on 1D titers
+```{r}
+PCA_1D <- prcomp(x = titer_mat_1D, scale = TRUE, center = TRUE)
+summary(PCA_1D)
+```
+
+Even in the 1D model, we need 2d to represent the titer map.
+Presumably, d1 represents the linear decrease in titer with distance, and d2 represents the peak titer for each dimension?
+
+## Visualize
+```{r}
+ggbiplot::ggbiplot(PCA_1D, labels = rownames(titer_mat_1D)) +
+  ylim(c(-2, 2)) + xlim(c(-2,2))
+```
+
+# Extend to 2D
+
+If the above interpretation is true, then if we define the titer model in 2D, we should need 3 dimensions to represent the titer map.
+
+
+## 2D model:
+
+$z_{ik} = z^{max}_k - c(\sqrt(x_{1i}-x_{1k})^2+(x_{2i}-x_{2k})^2)$
+
+
+## Simulate 2D titers
+```{r}
+get_one_titer <- function(z_max, xi, xk, ndim = 1, c = 1){
+  stopifnot(length(xi) == length(xk))
+ # cat(sprintf('xi is %s\n', xi))
+  stopifnot(length(xi) == ndim)
+  this.dist = get_euclidean_distance(xi, xk)
+  #cat(sprintf('this distnace is %s\n', this.dist))
+  z_max - this.dist
+}
+
+titer_df_2D <- expand_grid(x1_strain = 1:10,
+                           x2_strain = 1:10,
+            x1_serum = 1:10,
+            x2_serum = 1:10) %>%
+  group_by(x1_strain, x2_strain) %>%
+  mutate(strain_id = group_indices(.)) %>%
+  ungroup() %>%group_by(x1_serum, x2_serum) %>%
+  mutate(serum_id = group_indices(.))
+
+titer_df_2D$titer = foreach(xi1 = titer_df_2D$x1_strain,
+        xi2 = titer_df_2D$x2_strain,
+        xk1 = titer_df_2D$x1_serum,
+        xk2 = titer_df_2D$x2_serum,
+        .combine = 'c') %do% {
+          get_one_titer(z_max = 10, xi = c(xi1, xi2), xk = c(xk1, xk2), ndim = 2, c = 1)
+        }
+
+
+titer_mat_2D = matrix(titer_df_2D$titer, nrow = 100, ncol = 100, byrow = F, dimnames = list(paste0('serum', 1:100), paste0('strain', 1:100)))
+```
+
+## Perform PCA on 1D titers
+```{r}
+PCA_2D <- prcomp(x = titer_mat_2D, scale = TRUE, center = TRUE)
+summary(PCA_2D)
+```
+
+Even in the 1D model, we need 2d to represent the titer map.
+Presumably, d1 represents the linear decrease in titer with distance, and d2 represents the peak titer for each dimension?
+
+## Visualize
+```{r}
+ggbiplot::ggbiplot(PCA_1D, labels = rownames(titer_mat_1D)) +
+  ylim(c(-2, 2)) + xlim(c(-2,2))
+```
