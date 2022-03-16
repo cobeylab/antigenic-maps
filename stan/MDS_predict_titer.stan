@@ -2,9 +2,10 @@ data {
   int<lower=3> n_antigens;
   int<lower=0> n_sera;
   int<lower=0> n_dim;
-  //real sigma;
-  real observed_distances[n_antigens,n_sera]; // Array of distances
+  real observed_titers[n_antigens,n_sera]; // Array of observed titers
+  real smax[n_antigens,n_sera]; // Used to calculate titer in the model
 }
+
 parameters {
   // Note: ag1 coords are all 0 (ag1 falls at the origin)
   //       ag1 coord 1 is free. Ag2 coords 2, 3, etc. are 0 (ag2 is on the x-axis).
@@ -16,6 +17,7 @@ parameters {
 
 transformed parameters{
   real map_distances[n_antigens, n_sera]; 
+  real estimated_titers[n_antigens, n_sera];
   {
     vector[n_dim] ag1_coords;
     vector[n_dim] ag2_coords;
@@ -28,10 +30,13 @@ transformed parameters{
     for (serum in 1:n_sera){
       // ag1 
       map_distances[1,serum] = distance(ag1_coords, serum_coords[serum]);
+      estimated_titers[1,serum] = smax[1,serum]-map_distances[1,serum];
       // ag2
       map_distances[2,serum] = distance(ag2_coords, serum_coords[serum]);
+      estimated_titers[2,serum] = smax[2,serum] - map_distance[2,serum];
       for (strain in 3:n_antigens){
         map_distances[strain,serum] = distance(antigen_coords[strain-2], serum_coords[serum]);
+        estimated_titers[strain,serum] = smax[strain,serum] - map_distance[strain,serum];
       }
     }
   }
@@ -43,7 +48,7 @@ model {
 
   for (serum in 1:n_sera){
     for (strain in 1:n_antigens){
-      observed_distances[strain, serum] ~ normal(map_distances[strain,serum], sigma);
+      observed_titers[strain, serum] ~ normal(estimated_titers[strain,serum], sigma);
     }
   }
  }
@@ -53,7 +58,7 @@ model {
 
     for(serum in 1:n_sera){
       for(strain in 1:n_antigens){
-        log_lik[strain,serum] = normal_lpdf(observed_distances[strain,serum] | map_distances[strain,serum], sigma);
+        log_lik[strain,serum] = normal_lpdf(observed_titers[strain,serum] | estimated_titers[strain,serum], sigma);
       }
     } 
 
