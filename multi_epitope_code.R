@@ -815,7 +815,7 @@ get_map_error_df <- function(stan_fit,
           by = c('serum', 'antigen')) %>%
     arrange(serum, antigen, chain, iter) %>%
     group_by(antigen, serum) %>%
-    summarise(map_distance = mean(map_distance),
+    dplyr::summarise(map_distance = mean(map_distance),
               titer_distance = unique(titer_distance),
               pairwise_error = mean(sqrt( (map_distance-titer_distance)^2 ))) %>%
     ungroup()
@@ -828,5 +828,37 @@ get_map_error <- function(stan_fit,
     ungroup() %>%
     summarise(map_error = sum(pairwise_error), .groups = 'drop') %>%
     pull(map_error)
+}
+
+
+run_pca_on_titer_map <- function(titer_matrix){
+  
+  this_pca <- prcomp(x = titer_matrix, scale = TRUE, center = TRUE)
+  pca_summary <- summary(this_pca)
+  this_ndim = ncol(pca_summary$importance)
+  
+  biplot <- ggbiplot::ggbiplot(this_pca, labels = rownames(titer_matrix)) +
+    ylim(c(-2, 2)) + xlim(c(-2,2))
+  
+  var_explained_plot <- tibble(component = factor(1:this_ndim, labels = paste0('PC', 1:this_ndim)),
+                               variance_explained = summary(this_pca)$importance[2,],
+                               cumulative_var_explained = cumsum(variance_explained)) %>%
+    ggplot() +
+    geom_bar(aes(x = component, y = variance_explained), stat = 'identity') +
+    geom_point(aes(x = component, y = cumulative_var_explained), color = 'deepskyblue') +
+    geom_line(aes(x = as.numeric(component), y = cumulative_var_explained), color = 'deepskyblue') 
+  
+  return(list(pca_summary = pca_summary,
+              biplot = biplot,
+              var_explained_plot = var_explained_plot))
+}
+
+convert_titer_map_to_matrix <- function(titer_map){
+  sera = unique(titer_map$serum)
+  antigens = unique(titer_map$antigen)
+  stopifnot(all(titer_map %>% group_by(serum, antigen) %>% dplyr::summarise(n = n()) %>% pull(n) == 1))
+  titer_map <- titer_map %>% arrange(antigen, serum)
+  matrix(titer_map$logtiter, nrow = length(sera), ncol = length(antigens), byrow = F, 
+         dimnames = list(paste0('serum', sera), paste0('antigen', antigens)))
 }
   
