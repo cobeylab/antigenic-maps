@@ -174,6 +174,35 @@ format_stan_inputs <- function(titer_map){
   distmat
 }
 
+format_stan_titers <- function(titer_map){
+  antigens = unique(titer_map$antigen)
+  sera = unique(titer_map$serum)
+  
+  titer_matrix = matrix(NA, length(antigens), length(sera))
+  for(aa in 1:length(antigens)){
+    for(ss in 1:length(sera)){
+      titer_matrix[aa,ss] = filter(titer_map, antigen == aa & serum == ss) %>%
+        pull(logtiter)
+    }
+  }
+  titer_matrix
+}
+
+format_stan_smax <- function(titer_map){
+  antigens = unique(titer_map$antigen)
+  sera = unique(titer_map$serum)
+  
+  outmat = matrix(NA, length(antigens), length(sera))
+  for(aa in 1:length(antigens)){
+    for(ss in 1:length(sera)){
+      outmat[aa,ss] = filter(titer_map, antigen == aa & serum == ss) %>%
+        mutate(smax = mean(c(serum_potency, antigen_avidity))) %>%
+        pull(smax)
+    }
+  }
+  outmat
+}
+
 
 fit_stan_MDS <- function(
   mod = 'MDS.stan',
@@ -797,7 +826,7 @@ centroid_counterfactual <- function(fitlist,
 
 
 
-get_map_error_df <- function(stan_fit,
+get_pairwise_titer_error <- function(stan_fit,
                              titer_map){
   raw_fits <- rstan::extract(stan_fit, permuted = F, inc_warmup = F)
   niter <- dim(raw_fits)[1]
@@ -805,28 +834,80 @@ get_map_error_df <- function(stan_fit,
   
   parnames = dimnames(raw_fits)[3]
   parname_contains <- function(parnames, this_pattern){sapply(parnames, function(xx) grepl(pattern = this_pattern, x = xx)) %>% as.vector()}
-  is_prediction = parname_contains(parnames, 'map')
+  is_map_distance = parname_contains(parnames, 'map')
+  is_titer = parname_contains(parnames, 'estimated_titers')
   
-  
-  lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_prediction]) %>% mutate(iter = 1:niter)}) %>%
+merge(
+  lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_map_distance]) %>% mutate(iter = 1:niter)}) %>%
     bind_rows(.id = 'chain') %>%
-    pivot_longer(contains('map'), names_to = c('antigen', 'serum'), names_pattern = 'map_distances.(\\d+),(\\d+).', values_to = 'map_distance') %>%
+    pivot_longer(contains('map'), names_to = c('antigen', 'serum'), names_pattern = 'map_distances.(\\d+),(\\d+).', values_to = 'map_distance'),
+  lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_titer]) %>% mutate(iter = 1:niter)}) %>%
+    bind_rows(.id = 'chain') %>%
+    pivot_longer(contains('titer'), names_to = c('antigen', 'serum'), names_pattern = 'estimated_titers.(\\d+),(\\d+).', values_to = 'estimated_titer')
+  )%>%
+  merge(titer_map, 
+        by = c('serum', 'antigen')) %>%
+  arrange(serum, antigen, chain, iter) %>%
+  group_by(antigen, serum) %>%
+  dplyr::summarise(mean_map_distance = mean(map_distance),
+                   titer_distance = unique(titer_distance),
+                   pairwise_distance_error = mean(sqrt( (map_distance-titer_distance)^2 )),
+                   pairwise_titer_error = mean(sqrt((estimated_titer-logtiter)^2)),
+                   mean_estimated_titer = mean(estimated_titer),
+                   observed_titer = unique(logtiter)) %>%
+    ungroup()
+}
+
+get_titer_error <- function(stan_fit, 
+                          titer_map){
+  get_pairwise_map_error(stan_fit,
+                   titer_map) %>%
+    ungroup() %>%
+    summarise(distance_error = sum(pairwise_distance_error),
+              titer_error = sum(pairwise_titer_error)) %>%
+    pull(map_error)
+}
+
+
+get_distance_error <- function(stan_fit, 
+                               titer_map){
+  get_pairwise_map_error(stan_fit,
+                         titer_map) %>%
+    ungroup() %>%
+    summarise(distance_error = sum(pairwise_distance_error),
+              titer_error = sum(pairwise_titer_error)) %>%
+    pull(map_error)
+}
+
+get_distance_error_df <- function(stan_fit, titer_map){
+  raw_fits <- rstan::extract(stan_fit, permuted = F, inc_warmup = F)
+  niter <- dim(raw_fits)[1]
+  nchains <- dim(raw_fits)[2]
+  
+  parnames = dimnames(raw_fits)[3]
+  parname_contains <- function(parnames, this_pattern){sapply(parnames, function(xx) grepl(pattern = this_pattern, x = xx)) %>% as.vector()}
+  is_map_distance = parname_contains(parnames, 'map')
+  
+  lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_map_distance]) %>% mutate(iter = 1:niter)}) %>%
+      bind_rows(.id = 'chain') %>%
+      pivot_longer(contains('map'), names_to = c('antigen', 'serum'), names_pattern = 'map_distances.(\\d+),(\\d+).', values_to = 'map_distance') %>%
     merge(titer_map, 
           by = c('serum', 'antigen')) %>%
     arrange(serum, antigen, chain, iter) %>%
     group_by(antigen, serum) %>%
-    dplyr::summarise(map_distance = mean(map_distance),
-              titer_distance = unique(titer_distance),
-              pairwise_error = mean(sqrt( (map_distance-titer_distance)^2 ))) %>%
+    dplyr::summarise(mean_map_distance = mean(map_distance),
+                     titer_distance = unique(titer_distance),
+                     pairwise_distance_error = mean(sqrt( (map_distance-titer_distance)^2 ))) %>%
     ungroup()
 }
 
-get_map_error <- function(stan_fit, 
-                          titer_map){
-  get_map_error_df(stan_fit,
-                   titer_map) %>%
+get_titer_error <- function(stan_fit, 
+                            titer_map){
+  get_pairwise_map_error(stan_fit,
+                         titer_map) %>%
     ungroup() %>%
-    summarise(map_error = sum(pairwise_error), .groups = 'drop') %>%
+    summarise(distance_error = sum(pairwise_distance_error),
+              titer_error = sum(pairwise_titer_error)) %>%
     pull(map_error)
 }
 
