@@ -858,8 +858,10 @@ merge(
     ungroup()
 }
 
-get_titer_error <- function(pairwise_errors){
- pairwise_errors %>%
+get_titer_error <- function(stan_fit, 
+                          titer_map){
+  get_pairwise_titer_error(stan_fit,
+                   titer_map) %>%
     ungroup() %>%
     summarise(titer_error = sum(pairwise_titer_error)) %>%
     pull(titer_error)
@@ -897,8 +899,10 @@ get_distance_error_df <- function(stan_fit, titer_map){
     ungroup()
 }
 
-get_titer_error <- function(pairwise_errors){
-   pairwise_errors %>%
+get_titer_error <- function(stan_fit, 
+                            titer_map){
+  get_pairwise_map_error(stan_fit,
+                         titer_map) %>%
     ungroup() %>%
     summarise(distance_error = sum(pairwise_distance_error),
               titer_error = sum(pairwise_titer_error)) %>%
