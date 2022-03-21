@@ -156,7 +156,7 @@ one_fit <- function(n_dim,
                n_sera = nsera, # integer
                n_dim = n_dim, # integer
                N_test_set = nrow(titer_map_test),
-               smax_test_set = (titer_map_test$serum_potency = titer_map_test$antigen_avidity)/2,
+               smax_test_set = (titer_map_test$serum_potency + titer_map_test$antigen_avidity)/2,
                serum_id_test_set = titer_map_test$serum,
                antigen_id_test_set = titer_map_test$antigen,
                observed_titers_test_set = titer_map_test$logtiter,
