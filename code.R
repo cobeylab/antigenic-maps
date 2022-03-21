@@ -22,6 +22,16 @@ ndim <- function(xx){
   }
 }
 
+test_train_split <- function(N,
+                             n_test,
+                             df){
+  stopifnot(nrow(df)==N)
+  test_inds = sample(1:N, size = n_test, replace = F)
+  return(list(test = df[test_inds,],
+              train = df[-test_inds,]
+))
+}
+
 
 # generate_map_coordinates <- function(n_dim, # Dimensions in Euclidean space 
 #                                      n_antigens, # Number of antigens in panel (n_antigens + n_sera must be > n_dim + 1)
