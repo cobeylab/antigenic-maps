@@ -12,7 +12,11 @@ Each unit of Euclidean distance between two strains represents one unit differen
 
 Now, immagine that strain d mutates to become a new strain, e, which falls 1 distance unit away from d.
 
-**In a 1D map**, a 1-unit mutation implies that for all strains in the panel, the titer to e is exactly 1 units greater or 1 units less than the titer to d.
+**In a 1D map**, a 1-unit differene between d and e means that if the location of d is fixed, there are only two possible locations for e on the map.
+
+The likelihood of each candidate location depends on e's distance from other strains in the panel, a, b, and c.
+
+For example, the following distance matrix would indicate 
 
 
 ```{r}
