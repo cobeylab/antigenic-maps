@@ -33,10 +33,10 @@ transformed parameters{
       estimated_titers[1,serum] = smax[1,serum]-map_distances[1,serum];
       // ag2
       map_distances[2,serum] = distance(ag2_coords, serum_coords[serum]);
-      estimated_titers[2,serum] = smax[2,serum] - map_distance[2,serum];
+      estimated_titers[2,serum] = smax[2,serum] - map_distances[2,serum];
       for (strain in 3:n_antigens){
         map_distances[strain,serum] = distance(antigen_coords[strain-2], serum_coords[serum]);
-        estimated_titers[strain,serum] = smax[strain,serum] - map_distance[strain,serum];
+        estimated_titers[strain,serum] = smax[strain,serum] - map_distances[strain,serum];
       }
     }
   }

@@ -86,24 +86,33 @@ generated quantities{
 
     // set serum and ag coord values
     this_serum_coords = serum_coords[serum_id_test_set[ii]];
+    //print("this serum is", serum_id_test_set[ii]);
 
     if(antigen_id_test_set[ii]==1){
+      //print("this ag is 1");
       this_ag_coords = rep_vector(0.0, n_dim);
     }
     else if(antigen_id_test_set[ii]==2){
+      //print("this ag is 2.");
       ag2_coords = rep_vector(0.0, n_dim);
       ag2_coords[1] = ag2_c1;
       this_ag_coords = ag2_coords;
     }
     else {
+      //print("this ag is", antigen_id_test_set[ii]-2);
       this_ag_coords = antigen_coords[antigen_id_test_set[ii]-2];
     }
 
     // Calculate the map distance 
     this_map_distance = distance(this_ag_coords, this_serum_coords);
+    //print("ag coords are", this_ag_coords);
+    //print("serum coords are", this_serum_coords);
+    //print("this distance is", this_map_distance);
 
     // Generate posterior predictive draws of the estimated titers and error
     predicted_titers[ii] = normal_rng(smax_test_set[ii] - this_map_distance, sigma);
+    //print("ssmax is", smax_test_set[ii]);
+    //print("predicted titer is", predicted_titers[ii]);
     posterior_predictive_titer_error[ii] = sqrt( (predicted_titers[ii]-observed_titers_test_set[ii])^2 ) ;
   }
 }
