@@ -7,7 +7,6 @@ library(foreach)
 library(doParallel)
 library(rstan)
 library(tidyverse)
-if(!dir.exists('diagnostics')) dir.create('diagnostics')
 
 
 ## Run 3D fits for even immunodominance
