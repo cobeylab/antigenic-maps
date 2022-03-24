@@ -1,8 +1,8 @@
 ## Plot and analyze maps
 
 rm(list = ls())
-source('../../../code.R')
-source('../../../multi_epitope_code_sparse_dataset.R')
+source('../../../R/code.R')
+source('../../../R/multi_epitope_code_sparse_dataset.R')
 library(foreach)
 library(doParallel)
 library(tidyverse)
@@ -22,6 +22,9 @@ skewed_test_train <- read_rds('skewed_inputs_test_train_split.rds')
 E1_fit_list <- read_rds('E1_fit_list.rds')
 E1_inputs <- read_rds('../E1_complete_dominance_inputs.rds')
 E1_test_train <- read_rds('E1_inputs_test_train_split.rds')
+
+E2_inputs = read_rds('../E2_complete_dominance_inputs.rds')
+E3_inputs = read_rds('../E3_complete_dominance_inputs.rds')
 
 get_loo <- function(stan_fit){
   loo<-rstan::loo(stan_fit, pars = 'log_lik',
@@ -181,4 +184,87 @@ cowplot::plot_grid(even_outputs$pca_results$var_explained_plot + ggtitle('even v
                    nrow = 2)
 ggsave('plots/pca.png', width = 10, height = 6, units = 'in')
 
+
+
+
+## Calculate error between E1 predictions and all other actual titers
+all_observed_titers = list(E1 = E1_inputs$titer_map,
+                           E2 = E2_inputs$titer_map,
+                           E3 = E3_inputs$titer_map,
+                           skewed = skewed_inputs$titer_map,
+                           even = even_inputs$titer_map)
+E1_temp <- foreach(these_observed_titers = all_observed_titers,
+                   this_observed_scheme = names(all_observed_titers)) %do% {
+  get_generalized_titer_errors(stan_fit = E1_fit_list[[2]], 
+                               test_set = E1_test_train$test, 
+                               observed_titers = these_observed_titers, fitted_immunodominance_scheme = 'E1', 
+                               observed_immunodominance_scheme = this_observed_scheme)
+}
+E1_generalized_overall_error = lapply(E1_temp, function(ll) ll$overall_errors) %>% bind_rows()
+E1_generalized_pairwise = lapply(E1_temp, function(ll) ll$pairwise_errors) %>% bind_rows()
+ag_serum_map = E1_generalized_pairwise %>% arrange(id) %>% group_by(antigen, serum, id) %>% summarise()
+E1_generalized_pairwise %>%
+  arrange(id) %>%
+  mutate(x_location = as.numeric(id) + (as.numeric(as.factor(kind))-3)/10) %>%
+ggplot() +
+  geom_point(aes(x = x_location, y = titer_error_med, color = kind))+
+  geom_segment(aes(x = x_location, xend = x_location, y = titer_error_0.025, yend = titer_error_0.975, color = kind)) +
+  ylab('posterior predictive error') +
+  xlab('') +
+  geom_hline(aes(yintercept = 1), lty = 2) +
+  scale_x_continuous(name = 'test set titers', breaks = 1:5, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave('plots/generalized_E1_error.png', width = 7, height = 4, units = 'in', dpi = 300)
+
+
+
+## REPEAT FOR EVEN FITS
+even_temp <- foreach(these_observed_titers = all_observed_titers,
+                   this_observed_scheme = names(all_observed_titers)) %do% {
+                     get_generalized_titer_errors(stan_fit = even_fit_list[[2]], 
+                                                  test_set = even_test_train$test, 
+                                                  observed_titers = these_observed_titers, fitted_immunodominance_scheme = 'even', 
+                                                  observed_immunodominance_scheme = this_observed_scheme)
+                   }
+even_generalized_overall_error = lapply(even_temp, function(ll) ll$overall_errors) %>% bind_rows()
+even_generalized_pairwise = lapply(even_temp, function(ll) ll$pairwise_errors) %>% bind_rows()
+ag_serum_map = even_generalized_pairwise %>% arrange(id) %>% group_by(antigen, serum, id) %>% summarise()
+even_generalized_pairwise %>%
+  arrange(id) %>%
+  mutate(x_location = as.numeric(id) + (as.numeric(as.factor(kind))-3)/10) %>%
+  ggplot() +
+  geom_point(aes(x = x_location, y = titer_error_med, color = kind))+
+  geom_segment(aes(x = x_location, xend = x_location, y = titer_error_0.025, yend = titer_error_0.975, color = kind)) +
+  ylab('posterior predictive error') +
+  xlab('') +
+  geom_hline(aes(yintercept = 1), lty = 2) +
+  scale_x_continuous(name = 'test set titers', breaks = 1:5, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave('plots/generalized_even_error.png', width = 7, height = 4, units = 'in', dpi = 300)
+
+
+
+# REPEAT FOR SKEWED FITS
+skewed_temp <- foreach(these_observed_titers = all_observed_titers,
+                   this_observed_scheme = names(all_observed_titers)) %do% {
+                     get_generalized_titer_errors(stan_fit = skewed_fit_list[[2]], 
+                                                  test_set = skewed_test_train$test, 
+                                                  observed_titers = these_observed_titers, fitted_immunodominance_scheme = 'skewed', 
+                                                  observed_immunodominance_scheme = this_observed_scheme)
+                   }
+skewed_generalized_overall_error = lapply(skewed_temp, function(ll) ll$overall_errors) %>% bind_rows()
+skewed_generalized_pairwise = lapply(skewed_temp, function(ll) ll$pairwise_errors) %>% bind_rows()
+ag_serum_map = skewed_generalized_pairwise %>% arrange(id) %>% group_by(antigen, serum, id) %>% summarise()
+skewed_generalized_pairwise %>%
+  arrange(id) %>%
+  mutate(x_location = as.numeric(id) + (as.numeric(as.factor(kind))-3)/10) %>%
+  ggplot() +
+  geom_point(aes(x = x_location, y = titer_error_med, color = kind))+
+  geom_segment(aes(x = x_location, xend = x_location, y = titer_error_0.025, yend = titer_error_0.975, color = kind)) +
+  ylab('posterior predictive error') +
+  xlab('') +
+  geom_hline(aes(yintercept = 1), lty = 2) +
+  scale_x_continuous(name = 'test set titers', breaks = 1:5, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave('plots/generalized_skewed_error.png', width = 7, height = 4, units = 'in', dpi = 300)
 
