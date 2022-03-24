@@ -2,8 +2,8 @@
 
 #SBATCH --time=01:00:00
 #SBATCH --job-name=2D-fits
-#SBATCH --account=cobey
-#SBATCH --partition=caslake
+#SBATCH --account=pi-cobey
+#SBATCH --partition=cobey
 #SBATCH --ntasks-per-node=1  # number of tasks
 #SBATCH --cpus-per-task=4    # number of threads per task
 #SBATCH --mail-type=END,FAIL,TIME_LIMIT
