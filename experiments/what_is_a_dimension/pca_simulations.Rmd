@@ -8,50 +8,79 @@ output: html_document
 We consider two ways to esimate matrix dimensionality:
 
   1. PCA - how many dimensions are needed to explain >95% of the variance?
+  2. SVD - what is the rank of the matrix?
   
 
 # Theory:
 
-## The definition of antigenic distance is:
+## The definition of a 1D titer matrix
+
+Consider a titer matrix whose rows represent unique sera and columns represent test strains.
+If the rank of this matrix is 1, then each row of the matrix is proportional to the first row.
+In other words, if a titer matrix has rank 1, then each serum's strain-specific titers are proportional.
+
+```{r echo=FALSE}
+cat(sprintf('A titer matrix of rank 1'))
+tibble(serum = 1:5, 
+       strain1 = c(2,3,4,5,6),
+       strain2 = c(3,4,5,6,7),
+       strain3 = c(10, 11, 12, 13, 14),
+       strain4 = c(1,2,3,4,5),
+       strain5 = c(6,7,8,9,10))
+```
+
+```{r echo=FALSE}
+tibble(serum = 1:5, 
+       strain1 = c(2,3,4,5,6),
+       strain2 = c(3,4,5,6,7),
+       strain3 = c(10, 11, 12, 13, 14),
+       strain4 = c(1,2,3,4,5),
+       strain5 = c(6,7,8,9,10)) %>%
+  pivot_longer(contains('strain'), names_to = 'strain', values_to = 'logtiter') %>%
+  ggplot(aes(x = serum, y = logtiter, color = strain)) +
+  geom_line() +
+  geom_point()+
+  ggtitle('Titers from a hypothetical matrix of rank 1')
+```
+
+This thought exercise has two takeaways:
+
+1. The rank of a titer matrix tells us something about how many axes of covariance exist among sera from different hosts.
+2. In a rank 1 matrix, the same strain always has the higher titer in each serum. This is implausible in a titer map.
+
+
+
+
+
+## How does the rank of a titer matrix relate to map dimensionality?
+
+1. The definition of antigenic distance is:
+
+
+$$ z_{ik} = z^{max}_k - d_{ik} $$
 
 * $z_{ik}$ log2 titer between strain i and serum k
 * $z^{max}_{k}$ is the max observed titer between serum k and any strain
-* $x_{m,i}$ is the mth coordinate of strain i
-* $x_{m,k}$ is the mth coordinate of serum k
-* $n_{dim}$ is the number of dimensions in Euclidean space
+* $d_{ik}$ is the Euclidean distance in the map between strain i and serum k
 
-$$ z_{ik} = z^{max}_k - d_{ik} $$
-$$ z_{ik} = z^{max}_k - \sqrt \sum_{m=1:n_{dim}}(x_{m,i}-x_{m,k})^2 $$
 
-If we define $\delta_{m.ik}=(x_{m,i}-x_{m,k})^2$, we can re-write this as:
+
+
+The definition of Euclidean distance is $\sqrt \sum_{m=1:n_{dim}}(x_{m,i}-x_{m,k})^2$. If we define $\delta_{m.ik}=(x_{m,i}-x_{m,k})^2$, we can re-write the definition of antigenic distance in terms of component distances squared.
 
 $$ z_{ik} = z^{max}_k - \sqrt \sum_{m=1:n_{dim}}\delta_{m,ik} $$
 
-This isn't a linear equation, but we can identify $n_{dim} + 1$ parameters:
-
-* There is one distance component for each dimension in $n_{dim}$
-* There is an intercept, $z_k^{max}$
-
-**--> Thus, we might expect the first ($n_{dim}+1$) principal components to explain the majority of the variance.**
-
-Let's test this:
+**We can use this equation to generate a titer matrix for arbitrary combinations of strains and sera:**
 
 
 ```{r, include=F, echo=F}
 library('doParallel')
 library('tidyverse')
-source('../../code.R')
+source('../../R/code.R')
 ```
 
 
-## 1. Test the hypothesis for titers generated to represent a 1D Euclidean map:
-
-Use the formula 
-
-$$ z_{ik} = z^{max}_k - \delta_{1,ik} $$
-
-to simulate titer for all possible combinations of $z_k^{max}$ and $\delta_{1,ik}$.
-
+A hypotical titer matrix generated with $n_{dim}$ = 1.
 ```{r echo=F}
 z_max = 10
 get_one_titer_1D <- function(z_max, xi, xk, c = 1){
@@ -67,6 +96,21 @@ titer_mat_1D = matrix(titer_df_1D$titer, nrow = 10, ncol = 10, byrow = F, dimnam
 
 titer_mat_1D
 ```
+
+
+
+**What is the expected relationship between the rank of a titer matrix and the dimensionality of the Euclidean map?**
+
+$z_{ik} = z^{max}_k - \sqrt \sum_{m=1:n_{dim}}\delta_{m,ik}$ isn't a linear equation, but we can identify $n_{dim} + 1$ parameters:
+
+* One $\delta_{m,ik}$ for each dimension in the map
+* An intercept, $z_k^{max}$
+
+**--> Thus, we might expect the first ($n_{dim}+1$) principal components to explain the majority of the variance in a titer matrix whose map should have $n_{dim}$ dimensions.**
+
+Let's test this:
+
+
 
 ### Perform PCA on 1D titers
 ```{r}
@@ -106,7 +150,7 @@ abline(b=0, r = 0)
 ```
 
 
-## Visualize
+
 ```{r echo = FALSE}
 # ggbiplot::ggbiplot(PCA_1D, labels = rownames(titer_mat_1D)) +
 #   ylim(c(-2, 2)) + xlim(c(-2,2))
@@ -155,10 +199,10 @@ titer_df_2D$titer = foreach(xi1 = titer_df_2D$x1_strain,
 titer_mat_2D = matrix(titer_df_2D$titer, nrow = 100, ncol = 100, byrow = F, dimnames = list(paste0('serum', 1:100), paste0('strain', 1:100)))
 ```
 
-### Perform PCA on 1D titers
+### Perform PCA on 2D titers
 ```{r}
 PCA_2D <- prcomp(x = titer_mat_2D, scale = TRUE, center = TRUE) 
-summary(PCA_2D)
+#summary(PCA_2D)
 ```
 
 ### Plot the variance explained
@@ -174,20 +218,17 @@ tibble(component = factor(1:100, labels = paste0('PC', 1:100)),
 ```
 
 ### Try rank estimation with svd
-```{r, echo = F, as.is=T}
+```{r include=FALSE}
 cat(sprintf('The singular values of the 2D titer matrix are:\n'))
 svd(titer_mat_2D)$d
 ```
-The rank of this matrix is much greater than 2, as none of the singular values are 0.
 
-But the first three singular values are much greater than all others, indicating that the first three dimensions explain a substantial amount of the variance.
-
-```{r, echo = F, as.is=T}
+```{r as.is=T, include=FALSE}
 plot(svd(titer_mat_2D)$d, xlab = 'dimension', ylab = 'singular value')
 abline(b=0, r = 0)
 ```
 
-Again, the number of dimensions needed to represent most of the variance is $n_{dim}+1$.
+
 
 
 
@@ -196,13 +237,13 @@ Again, the number of dimensions needed to represent most of the variance is $n_{
 ## Conclusion: 
 
 1. If we preform PCA on a titer matrix, the number of dimensions needed to accurately represent the matrix in an antigenic map should be equal to (R-1), where R is the number of dimensions to explain most of the variance. (As a rule of thumb, we can assume the first R dimensions explain >95% of the variance).
-2. Low dimensional maps imply that the titers observed in different sera have a high level of covariance.
+2. Low dimensional maps imply that the titers observed in different sera strongly covary along just a few eigenvectors.
 
 
 ## Interpretation/next steps:
 
 1. If we simulate strain-level titers derived from multiple epitopes, what do we observe in PCA?
-2. If we run PCA on empirical titer matrices, what do we observe?
+2. If we run PCA (or SVD) on empirical titer matrices, what do we observe?
 3. If we run PCA on titer matrices that incorporate more than one immune history, or immunodominance type, what do we observe?
 
 
