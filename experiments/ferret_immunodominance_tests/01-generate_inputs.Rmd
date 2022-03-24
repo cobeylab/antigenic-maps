@@ -83,57 +83,37 @@ ggsave(filename = paste0('epitope_coords_grid.png'))
 ```
 ## Generate sera and titer inputs
 ```{r}
-even_immunodominance_inputs <- generate_ferret_inputs(antigen_coords[,1:5], 
-                                                      relative_immunodominance = c(1, 1, 1), 
-                                                      n_epitopes = 3, 
-                                                      n_antigens = 5, 
-                                                      n_abs_per_serum = 1000, 
-                                                      sigma = .1)
+## Write a function to generate and save one set of inputs for each number of dimensions per epitope (n_dim) and immunodomiannce scheme
+generate_inputs_wrapper <- function(n_dim,
+                                    immunodominance_flag,
+                                    immunodominance_vec){
+  generate_ferret_inputs(antigen_coords, 
+                         relative_immunodominance = immunodominance_vec, 
+                         n_epitopes = 3, 
+                         n_antigens = 5, 
+                         n_dim = n_dim, 
+                         immunodominance_flag = immunodominance_flag, 
+                         outdir = 'inputs',
+                         n_abs_per_serum = 1000, 
+                         sigma = .1)
+}
 ```
 
-
+## Generate inputs for each immunodominance scheme and dimensions
 ```{r}
-skewed_immunodominance_inputs <- generate_ferret_inputs(antigen_coords[,1:5], 
-                                                      relative_immunodominance = c(1+2/3, 1, 1/3), 
-                                                      n_epitopes = 3, 
-                                                      n_antigens = 5, 
-                                                      n_abs_per_serum = 1000, 
-                                                      sigma = .1)
-```
+input_generation_list <- expand_grid(n_dim = 2:5,
+                                     immunodominance_flag = c('even', 'skewed', 'E1', 'E2', 'E3'),
+                                     immunodominance_vec = list(c(1,1,1),
+                                                                c(1+2/3, 1, 1/3),
+                                                                c(3,0,0),
+                                                                c(0,3,0),
+                                                                c(0,0,3)))
 
-
-```{r}
-E1_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords[,1:5], 
-                                                      relative_immunodominance = c(3, 0, 0), 
-                                                      n_epitopes = 3, 
-                                                      n_antigens = 5, 
-                                                      n_abs_per_serum = 1000, 
-                                                      sigma = .1)
-```
-
-```{r}
-E2_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords[,1:5], 
-                                                      relative_immunodominance = c(0, 3, 0), 
-                                                      n_epitopes = 3, 
-                                                      n_antigens = 5, 
-                                                      n_abs_per_serum = 1000, 
-                                                      sigma = .1)
-```
-
-```{r}
-E3_complete_dominance_inputs <- generate_ferret_inputs(antigen_coords[,1:5], 
-                                                      relative_immunodominance = c(0, 0, 3), 
-                                                      n_epitopes = 3, 
-                                                      n_antigens = 5, 
-                                                      n_abs_per_serum = 1000, 
-                                                      sigma = .1)
-```
-
-## Save inputs
-```{r}
-write_rds(even_immunodominance_inputs, paste0(outdir, '/even_immunodominance_inputs.rds'))
-write_rds(skewed_immunodominance_inputs, paste0(outdir, '/skewed_immunodominance_inputs.rds'))
-write_rds(E1_complete_dominance_inputs, paste0(outdir, '/E1_complete_dominance_inputs.rds'))
-write_rds(E2_complete_dominance_inputs, paste0(outdir, '/E2_complete_dominance_inputs.rds'))
-write_rds(E3_complete_dominance_inputs, paste0(outdir, '/E3_complete_dominance_inputs.rds'))
+foreach(this_n_dim = input_generation_list$n_dim,
+        this_immunodominance_flag = input_generation_list$immunodominance_flag,
+        this_immunodominance_vec = input_generation_list$immunodominance_vec) %do% {
+          generate_inputs_wrapper(n_dim = this_n_dim, 
+                                  immunodominance_flag = this_immunodominance_flag, 
+                                  immunodominance_vec = this_immunodominance_vec)
+        }
 ```
