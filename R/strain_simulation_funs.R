@@ -169,7 +169,9 @@ generate_ferret_inputs <- function(antigen_coords, # Data frame of ag coords
                             n_antigens,
                             n_dim,
                             n_abs_per_serum = 500,
-                            sigma = 1 # sd of abs around native coord
+                            sigma = 1, # sd of abs around native coord
+                            immunodominance_flag,
+                            outdir = 'inputs'
                             ){ # n antigens
   stopifnot(n_dim <= sum(grepl(pattern = 'c\\d?.+', x = names(antigen_coords))))
   ## Drop unused antigen_coords columns
@@ -230,9 +232,14 @@ generate_ferret_inputs <- function(antigen_coords, # Data frame of ag coords
     ungroup() %>%
     mutate(titer_distance = (serum_potency+antigen_avidity)/2 - logtiter)
   
-  return(list(ag_ab_coords = merged_df,
-              titer_map = titer_map))
-  
+  if(!dir.exists(outdir)) dir.create(outdir)
+  outfilename = sprintf('%s/%sD_%s_immunodominance_inputs.rds', outdir, n_dim, immunodominance_flag)
+  write_rds(
+  list(ag_ab_coords = merged_df,
+              titer_map = titer_map),
+  file = outfilename
+  )
+  cat(sprintf('saved outputs in %s', outfilename))
 }
   
 
