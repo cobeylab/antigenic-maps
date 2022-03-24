@@ -959,6 +959,80 @@ return(list(model_errors = model_errors,
 
 
 
+
+## Calculate the error between titers predicted in a model with one immunodominance scheme, against titers observed under any other immunodominance scheme
+get_generalized_titer_errors <- function(stan_fit, 
+                                          test_set,
+                                          observed_titers,
+                                          fitted_immunodominance_scheme = 'E1',
+                                          observed_immunodominance_scheme = 'even'){
+
+  
+  
+  raw_fits <- rstan::extract(stan_fit, permuted = F, inc_warmup = F)
+  niter <- dim(raw_fits)[1]
+  nchains <- dim(raw_fits)[2]
+  
+  parnames = dimnames(raw_fits)[3]
+  parname_contains <- function(parnames, this_pattern){sapply(parnames, function(xx) grepl(pattern = this_pattern, x = xx)) %>% as.vector()}
+  is_predicted_titer = parname_contains(parnames, 'predicted_titers')
+  is_predictive_error = parname_contains(parnames, 'posterior_predictive_titer_error')
+  
+  stopifnot(all(test_set %>% group_by(antigen, serum) %>% summarise(n = n()) %>% pull(n) == 1 ))
+  test_set = test_set %>% 
+    mutate(id = 1:nrow(.)) 
+  
+  ## Take the observed titer map and extract the entries in the test set
+  observed_subset = merge(test_set %>% 
+                            select(id, serum, antigen),
+                          observed_titers,
+                          all.x = T, all.y = F)
+  
+  full_posterior <- merge(
+    ## Reformatted predicted titers
+    lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_predicted_titer]) %>% mutate(iter = 1:niter)}) %>%
+      bind_rows(.id = 'chain') %>%
+      pivot_longer(contains('predicted'), names_to = c('id'), names_pattern = 'predicted_titers.(\\d+).', values_to = 'predicted_log_titer'),
+    ## Reformatted predictive error
+    lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_predictive_error]) %>% mutate(iter = 1:niter)}) %>%
+      bind_rows(.id = 'chain') %>%
+      pivot_longer(contains('predictive'), names_to = c('id'), names_pattern = 'posterior_predictive_titer_error.(\\d+).', values_to = 'predictive_error')
+  ) %>%
+    merge(observed_subset) %>%
+    arrange(id, chain, iter) %>%
+    ungroup()
+  
+  
+  ## calculate pairwise errors and return
+  pairwise_errors <- full_posterior %>%
+    mutate(titer_error = sqrt((predicted_log_titer - logtiter)^2)) %>%
+    group_by(antigen, serum, id)  %>%
+    dplyr::summarise(titer_error_med = median(titer_error),
+                     titer_error_0.025 = quantile(titer_error, 0.025),
+                     titer_error_0.975 = quantile(titer_error, 0.975)) %>%
+    ungroup() %>%
+    mutate(kind = sprintf('%s_predictions:%s_observations', fitted_immunodominance_scheme, observed_immunodominance_scheme))
+  
+  overall_errors = full_posterior %>%
+    mutate(titer_error = sqrt((predicted_log_titer - logtiter)^2)) %>%
+    group_by(chain, iter) %>% 
+    summarise(titer_error = sum(titer_error)) %>% ## Sum across data points
+    ungroup() %>%
+    dplyr::summarise(titer_error_med = median(titer_error),
+                     titer_error_0.025 = quantile(titer_error, 0.025),
+                     titer_error_0.975 = quantile(titer_error, 0.975)) %>%
+    ungroup() %>%
+    mutate(kind = sprintf('%s_predictions:%s_observations', fitted_immunodominance_scheme, observed_immunodominance_scheme))
+  
+
+  
+  return(list(overall_errors = overall_errors,
+              pairwise_errors = pairwise_errors))
+}
+
+
+
+
 run_pca_on_titer_map <- function(titer_matrix){
   
   this_pca <- prcomp(x = titer_matrix, scale = TRUE, center = TRUE)
@@ -989,5 +1063,12 @@ convert_titer_map_to_matrix <- function(titer_map){
   titer_map <- titer_map %>% arrange(antigen, serum)
   matrix(titer_map$logtiter, nrow = length(sera), ncol = length(antigens), byrow = F, 
          dimnames = list(paste0('serum', sera), paste0('antigen', antigens)))
+}
+
+
+test_train_split <- function(N, n_test, df){
+  test_indices = sample(1:N, size = n_test, replace = F)
+  list(train = df[-test_indices,],
+       test = df[test_indices,])
 }
   
