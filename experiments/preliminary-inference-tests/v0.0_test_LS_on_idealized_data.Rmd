@@ -1,0 +1,280 @@
+---
+title: "Bayesian MDS in Stan"
+output: html_notebook
+---
+
+Write and test a Stan model
+
+```{r}
+generate_alleles <- function(ndim, nalleles, range = 10){
+  # Randomly draw coordinates in each dimension
+  sapply(1:ndim, function(dim){runif(nalleles, -range/2, range)}) %>%
+    as.tibble() %>%
+    set_names(paste0('c', 1:ndim)) %>%
+    # Assign allele ids
+    mutate(allele = 1:nalleles)
+}
+```
+
+```{r}
+## Generate coordinates for a separate set of antigens (Ag) and sera (Ab)
+ab_df <- generate_alleles(2, 5)
+ag_df <- generate_alleles(2, 5)
+
+ab_coords <- as.matrix(ab_df %>% select(starts_with('c')))
+ag_coords <- as.matrix(ag_df %>% select(starts_with('c')))
+
+ag_ab_df<- bind_rows(list('ag' = ag_df,
+               'ab' = ab_df),
+          .id = 'kind') %>%
+  rename(id = allele) %>%
+  select(kind, id, starts_with('c'))
+
+true_plot <- ag_ab_df %>%
+  ggplot(aes(x = c1, y = c2, color = kind)) +
+  geom_text(aes(label = id))
+
+true_plot
+```
+
+```{r}
+get_l2_distance<- function(v1, v2){
+  stopifnot(length(v1) == length(v2))
+  sqrt(sum((v1-v2)^2))
+}
+
+## Calculate the distance matrix
+get_distances <- function(ab_coords, ag_coords){
+  distmat = matrix(NA, nrow = nrow(ag_coords), ncol = nrow(ab_coords))
+  rownames(distmat) = paste0('ag', 1:nrow(ag_coords))
+  colnames(distmat) = paste0('ab', 1:nrow(ab_coords))
+  for(ab in 1:nrow(ab_coords)){
+    for(ag in 1:nrow(ag_coords)){
+      distmat[ag, ab] = get_l2_distance(ab_coords[ab,], ag_coords[ag,])
+    }
+  }
+  distmat
+}
+```
+
+```{r}
+observed_distances = get_distances(ab_coords, ag_coords)
+
+## Test
+# sqrt(sum((ab_coords[3,]-ag_coords[5,])^2)) == observed_distances[5,3]
+# sqrt(sum((ab_coords[1,]-ag_coords[1,])^2)) == observed_distances[1,1]
+# sqrt(sum((ab_coords[2,]-ag_coords[5,])^2)) == observed_distances[5,2]
+# sqrt(sum((ab_coords[2,]-ag_coords[4,])^2)) == observed_distances[4,2]
+# sqrt(sum((ab_coords[2,]-ag_coords[3,])^2)) == observed_distances[3,2]
+```
+
+
+```{r}
+fit_MDS_MLE <- function(
+  observed_distances, # vector of delay for each individual in the data
+  n_antigens,
+  n_sera,
+  n_dim
+) {
+
+  stopifnot(nrow(observed_distances) == n_antigens)
+  stopifnot(ncol(observed_distances) == n_sera)
+  
+  loss_function <- function(pars, observed_distances, n_antigens, n_sera, n_dim){
+    stopifnot(length(pars) == (n_antigens+n_sera)*n_dim)
+    
+    estimated_ag_coords <- matrix(pars[1:(n_antigens*n_dim)], n_antigens, n_dim)
+    estimated_ab_coords <- matrix(pars[(n_antigens*n_dim+1):length(pars)], n_sera, n_dim)
+    
+    estimated_distances <- get_distances(estimated_ab_coords, estimated_ag_coords)
+    sum((observed_distances - estimated_distances)^2)
+  }
+
+  generate_initial_guess <- function(n_antigens, n_sera, n_dim){
+    ag_c1s <- runif(n_antigens, -10, 10); names(ag_c1s) = paste0('ag', 1:n_antigens, 'c1')
+    ag_c2s <- runif(n_antigens, -10, 10); names(ag_c2s) = paste0('ag', 1:n_antigens, 'c2')
+    ab_c1s <- runif(n_sera, -10, 10); names(ab_c1s) = paste0('ab', 1:n_antigens, 'c1')
+    ab_c2s <- runif(n_sera, -10, 10); names(ab_c2s) = paste0('ab', 1:n_antigens, 'c2')
+    
+    c(ag_c1s, ag_c2s, ab_c1s, ab_c2s)
+  }
+  
+  ## Repeat the fit 5 times from different initial values to verify convergence
+  
+  fit_list <- lapply(1:10, function(x) { optim(par = generate_initial_guess(n_antigens, n_sera, n_dim),
+                                             fn = loss_function,
+                                             observed_distances = observed_distances,
+                                             n_antigens = n_antigens, 
+                                             n_sera = n_sera,
+                                             n_dim = n_dim,
+                                             method = 'CG',
+                                             control = list(maxit = 500))}
+  )
+  ## Check convergence
+  if(!all(sapply(fit_list, function(ll) ll$convergence) == 0)){
+    warning('Not all optimizations converged! - Check individual fits')
+    return(fit_list)
+  }
+  ## Check that if all runs converged, that they all converged to the same solution
+  errfun_value <- sapply(fit_list, function(ll) ll$value)
+  if(!all(abs(errfun_value - mean(errfun_value) < .5))){warning('Not all runs converged to the same solution. Check individual fits.')}
+  
+  return(list(best_fit = fit_list[errfun_value == min(errfun_value)][[1]],
+              all_fits = fit_list))
+}
+
+```
+
+```{r}
+fits <- fit_MDS_MLE(observed_distances = observed_distances, n_antigens = 5, n_sera = 5, n_dim = 2)
+fits
+```
+## Visualize the difference between fits
+```{r}
+get_fits_df <- function(fit_obj){
+  tibble(coordinate = fit_obj$par,
+       label = names(fit_obj$par)) %>%
+  tidyr::extract(label, into = c('kind','id', 'dim'), regex = '(a\\w)(\\d)c(\\d)', convert = T) %>%
+  pivot_wider(names_from = dim, values_from = coordinate, names_prefix = 'c') 
+}
+```
+
+
+Plot the solutions from each run.
+
+Note that the runs with near-0 errfun all have very similar topology, whereas the higher-errfun solutions seem like a local min solution
+```{r}
+all_fits_df <- lapply(fits$all_fits, function(ll){ 
+  get_fits_df(ll) %>%
+  mutate(errfun = ll$value,
+         convergence = ll$convergence) }) %>%
+  bind_rows(.id = 'fit')
+```
+
+```{r}
+all_fits_df %>%
+  ggplot()+
+  geom_point(aes(x = c1, y = c2, shape = kind, color = errfun)) +
+  facet_wrap(.~fit)
+```
+
+
+## Compare errorfunctions
+```{r}
+tibble(fit = 1:10,
+       value = sapply(fits$all_fits, function(ll) ll$value)
+) %>%
+  ggplot() +
+  geom_histogram(aes(x = value), bins = 100)
+```
+
+
+
+## Compare distance matrices
+```{r}
+get_distances(ab_coords = fits_df %>% dplyr::filter(kind == 'ab') %>% select(starts_with('c')) %>% as.matrix,
+              ag_coords = fits_df %>% dplyr::filter(kind == 'ag') %>% select(starts_with('c')) %>% as.matrix)
+
+observed_distances
+```
+
+## Plot
+```{r}
+fits_df <- get_fits_df(fits$best_fit)
+
+mds_plot <- fits_df %>%
+  ggplot(aes(x = c1, y = c2, color = kind))+
+  geom_text(aes(label = id))
+
+true_plot %>% ggtitle('truth')
+```
+```{r}
+mds_plot %>% ggtitle('mds')
+```
+
+## The MDS can recover the map, but it's often shifted, rotated, and reflected relative to the original
+
+## Try fixing one point to see if we can recover the original better.
+
+
+
+NOTE - below I tried to change basis to recover the original map, but the basis transformation is distorting the MDS solution and this isn't working.
+
+
+
+## Transform to the standard basis:
+
+```{r}
+## Solve for the basis transform
+solve_for_transition_to_standard_basis <- function(mds_coords, original_coords){
+  loss_function <- function(pars, mds_coords, original_coords){
+    v1 = pars['v1']
+    v2 = pars['v2']
+    u1 = pars['u1']
+    u2 = pars['u2']
+    
+    Cprime = t(mds_coords)
+    C = t(original_coords)
+    
+    transition_matrix = matrix(c(v1, v2, u1, u2), 2, 2)
+    
+    sqrt(sum(((transition_matrix %*% Cprime)-C)^2))
+  }
+  
+  optim(par = c(v1 = runif(1, -5, 5), v2 = runif(1, -5, 5), u1 = runif(1, -5, 5), u2 = runif(1, -5, 5)), fn = loss_function, mds_coords = mds_coords, original_coords = original_coords)
+}
+```
+
+```{r}
+## Transform to standard basis
+transform_to_standard_basis <- function(mds_coords, original_coords){
+  stopifnot(all(dim(mds_coords) == dim(original_coords)))
+  transition_coords <- solve_for_transition_to_standard_basis(mds_coords, original_coords)
+  transition_matrix <- matrix(transition_coords$par, 2, 2)
+  transition_matrix %*% t(mds_coords) %>%
+    t() %>%
+    as.tibble() %>%
+    # Vertical and horizontal shift to re-center
+    mutate(V1 = V1 - mean(V1) + mean(original_coords[,1]),
+           V2 = V2 - mean(V2) + mean(original_coords[,2])) %>%
+    set_names(paste0('c', 1:2)) %>%
+    mutate(id = 1:n())
+}
+```
+
+```{r}
+## Apply function
+transformed_mds <- transform_to_standard_basis(mds_coords = fits_df %>% select(starts_with('c')) %>% as.matrix(), 
+                            original_coords = rbind(ag_coords, ab_coords)) %>%
+  mutate(kind = rep(c('ag', 'ab'), each = 5),
+         id = ag_ab_df$id) %>%
+  select(kind, id, starts_with('c'))
+```
+
+
+```{r}
+get_distances(ab_coords = transformed_mds %>% dplyr::filter(kind == 'ab') %>% select(starts_with('c')) %>% as.matrix,
+              ag_coords = transformed_mds %>% dplyr::filter(kind == 'ag') %>% select(starts_with('c')) %>% as.matrix)
+get_distances(ab_coords = fits_df %>% dplyr::filter(kind == 'ab') %>% select(starts_with('c')) %>% as.matrix,
+              ag_coords = fits_df %>% dplyr::filter(kind == 'ag') %>% select(starts_with('c')) %>% as.matrix)
+observed_distances
+```
+
+
+
+
+## Visualize fits using mean estimate for each coord
+```{r}
+bind_rows(list('raw_mds' = fits_df, 
+              'actual' = ag_ab_df,
+              'transformed_mds' = transformed_mds
+          ),
+          .id = 'source') %>%
+  mutate(panel = ifelse(source == 'raw_mds', 2, 1)) %>%
+  ggplot() +
+  geom_text(aes(x = c1, y = c2, color = source, label = id)) +
+  facet_grid(.~panel)
+```
+
+
+--> This isn't really working. I'm not sure if it's a problem with the model or a mean/median posterior thing.

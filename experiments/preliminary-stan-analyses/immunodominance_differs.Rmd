@@ -1,0 +1,549 @@
+---
+title: "Hosts differ in immunodominance"
+output: html_notebook
+---
+
+Test map inference when hosts differ in immunodominance.
+
+
+```{r}
+source('multi_epitope_code.R')
+source('../code.R')
+library('foreach')
+reset() ## clear workspace and load packages
+
+
+n_dim = 2
+n_antigens = 5
+n_ab = 0
+n_chains = 4
+n_iter = 5000 # half will be burn in
+n_epitopes = 3
+```
+
+## Generate antigen coordinates. Each antigen consists of 3 epitopes.
+```{r}
+set.seed(13)
+antigen_coords <- tibble(epitope = rep(c(1:n_epitopes), each = n_antigens),
+                         antigen = rep(1:n_antigens, n_epitopes),
+                         kind = 'antigen',
+                         c1 = generate_ag_coords_random(n_antigens, n_epitopes),
+                         c2 = generate_ag_coords_random(n_antigens, n_epitopes)) %>%
+  mutate(epitope = as.factor(epitope),
+         antigen = as.factor(antigen))
+
+
+## Standardize so that Ag1 epitope 1 is at the origin and Ag2 epitope 1 is on the x-axis
+shifted_coords <-  standardize_coordinates(coord_mat = antigen_coords %>% select(starts_with('c')) %>% as.matrix(), ag1_row = 1, ag2_row = 2) %>%
+  as_tibble() %>%
+  set_names(c('c1', 'c2'))
+
+antigen_coords$c1 = shifted_coords$c1
+antigen_coords$c2 = shifted_coords$c2
+```
+
+## Plot the coordinates
+```{r}
+antigen_coords %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, color = antigen, shape = epitope)) +
+  geom_polygon(aes(x = c1, y = c2, fill = antigen), alpha = .2)
+ggsave('sample_ag_plot.png', )
+```
+
+## Generate a set of hypothetical human sera. Initially:
+
+* Assume each person is infected with just one strain
+* Assume complete immunodominance of one epitope in each individual
+* Generate at least 3 "sera" containing 1000 Abs each, for each individual.
+
+
+To generate a serum:
+
+* Assume antibody coordinates are normally distributed about the coordinates of the infecting strain's epitopes, with sigma = 0.1
+* Assign antibodies to epitopes in proporiton to the epitope's host-specific imunodominance. Here, all Abs will be assigned to a single epitope.
+
+```{r}
+## Generate a data frame with serum metadata - which strain are Abs specific to and which epitope is immunodominant?
+serum_catalog <- expand_grid(infecting_strain = 1:n_antigens,
+                        dominant_epitope = 1:n_epitopes,
+                        replicate = 1:10 # Do 10 replicates for each possible comination
+                        ) %>%
+  mutate(serum_id = 1:nrow(.))
+```
+
+
+```{r include=FALSE}
+## Generate Ab populaitons for each serum.
+
+serum_list <- foreach(this.infecting.strain = serum_catalog$infecting_strain,
+        this.dominant.epitope = serum_catalog$dominant_epitope,
+        serum.id = serum_catalog$serum_id) %do% {
+          
+          n_epitopes = nrow(unique(antigen_coords[,'epitope']))
+          immunodominance_vec = vector(mode = 'numeric', length = n_epitopes)
+          immunodominance_vec[this.dominant.epitope] = n_epitopes
+          this_epitope_coords <- antigen_coords %>% 
+            filter(antigen==this.infecting.strain & epitope == this.dominant.epitope)
+          stopifnot(nrow(this_epitope_coords) == 1)
+          generate_one_serum(native_epitope_coords = this_epitope_coords,
+                                   n_epitopes = n_epitopes,
+                                   total_ab = 1000,
+                                   epitope_immunodominance = 1,
+                                   strain_dominance = c(1),
+                                   sigma = .1) %>%
+            mutate(serum_id = serum.id)
+        } 
+```
+
+## Generate a titer map 
+
+* Calculate the titer of each serum to each antigen.
+
+```{r}
+titer_map <- matrix(NA, nrow = length(serum_list), ncol = n_antigens, dimnames = list(paste0('serum', serum_catalog$serum_id), paste0('antigen', 1:n_antigens)))
+this.row = 0
+
+foreach(serum = serum_list) %do%{
+  this.row = this.row+1
+  # Extract serum Ab coords as a list of matrices, one for each eptiope
+  this_ab_position_list = lapply(1:n_epitopes, function(this.epitope){
+    serum %>% 
+      filter(epitope == this.epitope) %>%
+      select(matches('c\\d_Ab')) %>% 
+      as.matrix()
+  })
+for(this.antigen in 1:n_antigens){
+    # Extract antigen coords as a list of matrices, one for each epitope
+    this_antigen_list <- lapply(1:n_epitopes, function(this.epitope){
+      antigen_coords %>% 
+        filter(epitope == this.epitope & antigen == this.antigen) %>%
+        select(starts_with('c')) %>%
+        as.matrix()
+    })
+    # solve for titer  
+    #cat(sprintf('This serum is %s, this antigen is %s', this.row, this.antigen))
+    titer_map[this.row, this.antigen] = solve_for_titer_multi_epitope(ab_position_list = this_ab_position_list, 
+                                                                       relative_concentrations = c(1,1,1), 
+                                                                       ag_list = this_antigen_list, 
+                                                                       alpha = .25, 
+                                                                       r = 7)
+  }
+}
+
+titer_map
+```
+
+```{r}
+titer_df <- titer_map %>% as_tibble() %>%
+  bind_cols(serum_catalog) %>%
+  pivot_longer(starts_with('antigen'), names_to = c('test_antigen'), values_to = 'titer', names_prefix = 'antigen') %>%
+  group_by(test_antigen) %>%
+  mutate(titer_distance = max(log2(titer/10))-log2(titer/10))
+```
+
+
+```{r}
+titer_df %>%
+  ggplot() +
+  geom_tile(aes(x = infecting_strain, y = test_antigen, fill = titer, group = serum_id))+
+  facet_wrap(.~dominant_epitope, labeller = label_both) +
+  scale_fill_viridis_c(direction = -1, option = 'B')
+```
+
+```{r}
+titer_df %>%
+  ggplot() +
+  geom_tile(aes(x = infecting_strain, y = test_antigen, fill = titer_distance, group = serum_id))+
+  facet_wrap(.~dominant_epitope, labeller = label_both) +
+  scale_fill_viridis_c(direction = -1, option = 'B')
+```
+```{r}
+## Compare the actual distances between epitopes to the calculated titer distances
+get_one_distance <- function(this.epitope, antigen1, antigen2, antigen_coords){
+  vec1 <- antigen_coords %>%
+    filter(epitope == this.epitope) %>%
+    filter(antigen == antigen1) %>%
+    select(matches('c\\d')) %>%
+    as.vector()
+  
+  vec2 <- antigen_coords %>% 
+    filter(epitope == this.epitope) %>%
+    filter(antigen == antigen2) %>%
+    select(matches('c\\d')) %>%
+    as.vector()
+  
+  stopifnot(length(vec1) == length(vec2))
+  stopifnot(length(vec1) == ncol(select(antigen_coords, matches('c\\d'))))
+  
+  sqrt(sum( (vec1 - vec2)^2 ))
+}
+
+
+compare_distances <- expand_grid(dominant_epitope = 1:3,
+            infecting_strain = 1:5,
+            test_antigen = 1:5) %>%
+  rowwise() %>%
+  mutate(coord_distance = get_one_distance(this.epitope = dominant_epitope, antigen1 = infecting_strain, antigen2 = test_antigen, antigen_coords)) %>%
+  merge(titer_df, all.x = TRUE)
+```
+
+```{r}
+## Check that there is a clear relationship between titer and coordinate distances
+compare_distances %>%
+  ggplot() +
+  geom_point(aes(x = (titer_distance), y = (coord_distance), color = infecting_strain, fill = test_antigen), pch = 23) +
+  facet_wrap(.~dominant_epitope, labeller = label_both) +
+  scale_color_viridis_c(aesthetics = c('color', 'fill'))
+```
+
+# Now, for various combinations of immunodominance, infer the maps:
+```{r}
+## Wrapper function to extract distance matrix for input into stan
+get_titer_distmat <- function(valid_serum_ids,
+                              titer_df){
+  these.titers = titer_df %>%
+    filter(serum_id %in% unique(valid_serum_ids)) 
+  
+  antigens = as.numeric(unique(these.titers$test_antigen))
+  sera = as.numeric(unique(these.titers$serum_id))
+  #cat(print(antigens))
+  #cat(print(sera))
+  
+  distmat = matrix(NA, length(antigens), length(sera), dimnames = list(paste0('ag_', antigens), paste0('serum_', sera)))
+  #cat(print(distmat))
+  
+  for(aa in 1:length(antigens)){
+    for(ss in 1:length(sera)){
+      this.dist = filter(these.titers, test_antigen == antigens[aa] & serum_id == sera[ss]) %>%
+        pull(titer_distance)
+      #print(this.dist)
+      distmat[aa,ss] = this.dist
+    }
+  }
+  distmat
+}
+```
+
+
+```{r}
+plot_one_epitope_fits <- function(include.epitopes, 
+                                  these.fits,
+                                  flip_these_chains # Which chains to reflect over x?
+                                  ){
+  true_coords = standardize_coordinate_df(coord_df = antigen_coords %>% dplyr::filter(epitope %in% include.epitopes), ag1_row = 1, ag2_row = 2)
+ggplot() +
+  geom_point(data = true_coords, 
+             aes(x = c1, y = c2, fill = antigen), pch = 23, size = 3, color = 'black', alpha = .3) +
+  geom_point(data = extract_summary_coords(these.fits) %>%
+               mutate(c2 = ifelse(chain %in% flip_these_chains, -c2, c2)),
+             aes(x = c1, y = c2, color = allele, shape = kind)) +
+  facet_wrap(.~chain, labeller = label_both) +
+  scale_shape_manual(values = c(3,1, 4))
+}
+```
+
+
+```{r}
+plot_log_posteriors <- function(stanfit){
+  this.fit = rstan::extract(stanfit,permuted=F)
+print(dimnames(this.fit))
+this.fit[,,'lp__'] %>%
+  as_tibble() %>%
+  mutate(iter = 1:nrow(.)) %>%
+  pivot_longer(-iter, names_to = 'chain', values_to = 'log_posterior') %>%
+  ggplot() +
+  geom_point(aes(x = iter, y = log_posterior, color = chain))
+}
+```
+
+```{r}
+downsample <- function(x, n_out){
+  keep = sample(x, size=n_out, replace = FALSE)
+  x %in% keep
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+## 1.1 Infer map for E1 sera only. We should recover the E1 coords exactly
+
+```{r}
+valid_serum_ids = serum_catalog %>% filter(dominant_epitope == 1) %>% pull(serum_id)
+E1_only_fits <- fit_stan_MDS(observed_distances = get_titer_distmat(valid_serum_ids, titer_df = titer_df), 
+                       n_antigens = n_antigens, 
+                       n_sera = length(valid_serum_ids), 
+                       n_dim = n_dim, 
+                       chains = n_chains,
+                       niter = n_iter)
+```
+
+```{r}
+plot_one_epitope_fits(include.epitopes = 1, 
+                      these.fits = E1_only_fits,
+                      flip_these_chains = c(1,2))
+```
+
+
+
+## 1.2 Infer map for E2 sera only. We should recover the E1 coords exactly
+
+```{r}
+valid_serum_ids = serum_catalog %>% filter(dominant_epitope == 2) %>% pull(serum_id)
+E2_only_fits <- fit_stan_MDS(observed_distances = get_titer_distmat(valid_serum_ids, titer_df = titer_df), 
+                       n_antigens = n_antigens, 
+                       n_sera = length(valid_serum_ids), 
+                       n_dim = n_dim, 
+                       chains = n_chains,
+                       niter = n_iter)
+```
+
+```{r}
+plot_one_epitope_fits(include.epitopes = 2, 
+                      E2_only_fits,
+                      flip_these_chains = c(2,3))
+```
+This is strange... Why do chains 1,2,and 3 converge to an estimate for antigen 5 that's reflected in x?
+If they're getting stuck at a local optimum, then we should make sure that the log posterior density of those chains is lower than the log posterior of the better chains.
+The plot below verifies that this is true.
+
+```{r}
+plot_log_posteriors(stanfit = E2_only_fits)
+```
+
+
+
+
+
+
+## 1.3 Infer map for E3 sera only. We should recover the E1 coords exactly
+
+```{r}
+valid_serum_ids = serum_catalog %>% filter(dominant_epitope == 3) %>% pull(serum_id)
+E3_only_fits <- fit_stan_MDS(observed_distances = get_titer_distmat(valid_serum_ids, titer_df = titer_df), 
+                       n_antigens = n_antigens, 
+                       n_sera = length(valid_serum_ids), 
+                       n_dim = n_dim, 
+                       chains = n_chains,
+                       niter = n_iter)
+```
+
+```{r}
+plot_one_epitope_fits(include.epitopes= 3, 
+                      E3_only_fits,
+                      flip_these_chains = 3)
+```
+
+```{r}
+plot_log_posteriors(E3_only_fits)
+```
+
+
+
+
+
+
+
+# Ok, now see what happens when we try to infer titers using sera that are specific to different epitopes.
+
+
+## Let's start by doing an even mix of sera that are specific to E1 and E2
+```{r}
+valid_serum_ids = serum_catalog %>% 
+  filter(dominant_epitope != 3) %>% # Exclude sera specific to E3
+  group_by(dominant_epitope) %>%
+  filter(downsample(1:n(), n_out = 25)) %>% ## Keep 25 sera specific to each epitope
+  pull(serum_id)
+
+E1_E2_blanced <- fit_stan_MDS(observed_distances = get_titer_distmat(valid_serum_ids, titer_df = titer_df), 
+                       n_antigens = n_antigens, 
+                       n_sera = length(valid_serum_ids), 
+                       n_dim = n_dim, 
+                       chains = n_chains,
+                       niter = n_iter)
+```
+
+```{r}
+plot_two_epitope_fits <- function(include.epitopes, 
+                                  these.fits,
+                                  flip_these_chains, # Which chains to reflect over x?
+                                  valid_serum_ids,
+                                  serum_catalog
+                                  ){
+  true_coords = standardize_coordinate_df(coord_df = antigen_coords %>% filter(epitope %in% include.epitopes), ag1_row = 1, ag2_row = 2)%>%
+    mutate(kind=paste0('epitope', epitope))%>%
+    mutate(size =2,
+           alpha =.7,
+           antigen = as.numeric(antigen)) %>%
+    expand_grid(chain = 1:4)
+  
+  inferred_coords=extract_summary_coords(these.fits) %>%
+    mutate(c2 = ifelse(chain %in% flip_these_chains, -c2, c2),
+           kind = paste0('inferred_', kind)) %>%
+    arrange(kind, id) %>%
+    mutate(serum_id = NA)
+  inferred_coords$serum_id[inferred_coords$kind =='inferred_serum'] = valid_serum_ids
+  inferred_coords =merge(inferred_coords,
+                         serum_catalog,by ='serum_id',
+                         all.x = T,all.y = F)%>%
+    arrange(kind, id) %>%
+             mutate(size = ifelse(kind != 'inferred_serum', 1.2, 1), 
+                    alpha = 1) %>%
+             mutate(antigen = ifelse(grepl('serum', kind), infecting_strain, id)) %>%
+    filter(kind != 'inferred_serum')
+  
+  bind_rows(true_coords%>% select(c1, c2, kind, antigen, size, alpha, chain),
+            inferred_coords %>% select(c1, c2, kind, antigen, size, alpha, chain)) %>%
+    mutate(antigen =as.factor(antigen)) %>%
+    ggplot()+
+    geom_point(aes(x = c1, y = c2, color = antigen, shape = kind, size =size, alpha =alpha))+
+  scale_shape_manual(values =c(16,17, 2, 5, 3))+
+    scale_size(range =c(2,3), guide = FALSE)+
+    scale_alpha(range =c(.5, 1), guide =FALSE)+
+    facet_wrap(.~chain, labeller = label_both)
+}
+```
+
+
+```{r}
+plot_two_epitope_fits(include.epitopes = c(1,2), these.fits = E1_E2_blanced, flip_these_chains = NULL, valid_serum_ids = valid_serum_ids, serum_catalog)
+```
+
+Ok, this doesn't make sense to me. I'm going to see what happens if I shift the true epitope positions so that the Ag1 centroid is at the origin, and the Ag2 centroid is on the x axis. That might align better with the inferred Ag coordinates.
+
+
+
+
+```{r}
+plot_two_epitope_fits.v0.2 <- function(include.epitopes, 
+                                  these.fits,
+                                  flip_these_chains, # Which chains to reflect over x?
+                                  valid_serum_ids,
+                                  serum_catalog,
+                                  show_sera = FALSE,
+                                  connect_epitopes = FALSE
+                                  ){
+  ## Standardize to the Ag1, Ag2 centroid instead of E1 coords
+  these_coords <- antigen_coords %>% filter(epitope %in% include.epitopes)
+  ag1_ag2_centroids = these_coords %>%
+    filter(antigen %in% c(1,2)) %>%
+    group_by(antigen) %>%
+    summarise(epitope = NA,
+              antigen = unique(antigen), 
+              kind = 'antigen',
+              c1 = mean(c1),
+              c2 = mean(c2))
+  
+  true_coords = standardize_coordinate_df(coord_df = bind_rows(ag1_ag2_centroids, these_coords), # Standardize to Ag1, Ag2 centroids
+                                          ag1_row = 1, ag2_row = 2) %>%
+    filter(!is.na(epitope)) %>% # Remove ag1, ag2 centroids
+    mutate(kind=paste0('epitope', epitope))%>%
+    mutate(size =2,
+           alpha =.7,
+           antigen = as.numeric(antigen)) %>%
+    expand_grid(chain = 1:4)
+  
+  inferred_coords=extract_summary_coords(these.fits) %>%
+    mutate(c2 = ifelse(chain %in% flip_these_chains, -c2, c2),
+           kind = paste0('inferred_', kind)) %>%
+    arrange(kind, id) %>%
+    mutate(serum_id = NA)
+  inferred_coords$serum_id[inferred_coords$kind =='inferred_serum'] = valid_serum_ids
+  inferred_coords =merge(inferred_coords,
+                         serum_catalog,by ='serum_id',
+                         all.x = T,all.y = F)%>%
+    arrange(kind, id) %>%
+             mutate(size = ifelse(kind != 'inferred_serum', 1.2, 1), 
+                    alpha = 1) %>%
+             mutate(antigen = ifelse(grepl('serum', kind), infecting_strain, id)) 
+  
+  if(!show_sera) {
+    inferred_coords <- inferred_coords %>%
+    filter(kind != 'inferred_serum')
+  }
+  
+  outplot <- bind_rows(true_coords%>% select(c1, c2, kind, antigen, size, alpha, chain),
+            inferred_coords %>% select(c1, c2, kind, antigen, size, alpha, chain)) %>%
+    mutate(antigen =as.factor(antigen)) %>%
+    ggplot()+
+    geom_point(aes(x = c1, y = c2, color = antigen, shape = kind, size =size, alpha =alpha))+
+  scale_shape_manual(values =c(16,17, 2, 5, 3))+
+    scale_size(range =c(2,3), guide = 'none')+
+    scale_alpha(range =c(.5, 1), guide ='none')+
+    facet_wrap(.~chain, labeller = label_both)
+  
+  if(connect_epitopes){
+    outplot +
+      geom_line(aes(x = c1, y = c2, color = as.factor(antigen)), data = true_coords, alpha = .3) %>%
+      return()
+  }else{
+    return(outplot)
+  }
+}
+```
+
+
+```{r}
+plot_two_epitope_fits.v0.2(include.epitopes = c(1,2), 
+                           these.fits = E1_E2_blanced, 
+                           flip_these_chains = c(2,3,4), 
+                           valid_serum_ids = valid_serum_ids, serum_catalog,
+                           connect_epitopes = T) +
+  geom_hline(aes(yintercept =0)) +
+  geom_vline(aes(xintercept =0)) +
+  facet_grid(chain~antigen, labeller = label_both)
+```
+I don't really know what to make of this.
+
+I think that my expectation was:
+
+* Ag1 E1 sera would fall at Ag1 E1
+* Ag2 E1 sear would fall at Ag2 E1
+... etc.
+
+And we could still recover the underlying map.
+
+But that certainly isn't happening.
+
+Instead, we see that each of the inferred Ags are farther from inferred Ag1 on the x-axis than the true centroid of E1 and E2 for each antigen.
+The y axis seems reasonable.
+
+
+... what happens when we look at sera?
+
+```{r}
+plot_two_epitope_fits.v0.2(include.epitopes = c(1,2), 
+                           these.fits = E1_E2_blanced, 
+                           flip_these_chains = c(2,3,4), 
+                           valid_serum_ids = valid_serum_ids, serum_catalog,
+                           connect_epitopes = T,
+                           show_sera = T) +
+  geom_hline(aes(yintercept =0)) +
+  geom_vline(aes(xintercept =0)) +
+  facet_grid(chain~antigen, labeller = label_both)
+```
+
+## Let's plot the Ab distribution
+
+```{r}
+serum_list[valid_serum_ids]
+```
+
+
+
+## Some thoughts for next week:
+
+1. Why aren't the sera in the above plot falling on their corresponding epitopes? 
+      It seems like there could be a solution. Is STAN just not finding it?
+      
+2. If we increase the inferred dimensions, what happens?
+
+3. Let's plot the Ab distribution in this analysis.
