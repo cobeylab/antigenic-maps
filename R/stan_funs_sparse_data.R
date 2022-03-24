@@ -103,7 +103,7 @@ fit_stan_MDS <- function(
                           diagnostic_file = diagnostic_file
   )
   
-  if(all(summary(initial_fit)$summary[,'Rhat'] <= 1.03)){
+  if(all(summary(initial_fit)$summary[,'Rhat'] <= 1.02)){
     cat(sprintf('Returning initial fit'))
     return(initial_fit)
   }
@@ -146,8 +146,8 @@ fit_stan_MDS <- function(
     iter = niter,
     diagnostic_file = diagnostic_file)
   
-  if(! all(summary(refit)$summary[,'Rhat'] <= 1.03)){
-    cat(sprintf('Re-doing refit to achieve Rhat < 1.03'))
+  if(! all(summary(refit)$summary[,'Rhat'] <= 1.02)){
+    cat(sprintf('Re-doing refit to achieve Rhat < 1.02'))
     refit <- sampling(
       model, model_input_data, 
       chains = 1, 
@@ -730,4 +730,62 @@ test_train_split <- function(N, n_test, df){
   test_indices = sample(1:N, size = n_test, replace = F)
   list(train = df[-test_indices,],
        test = df[test_indices,])
+}
+
+
+one_fit <- function(n_dim,
+                    titer_map_train,
+                    titer_map_test,
+                    n_chains = 4,
+                    n_iter= 7000,
+                    idstring){
+  
+  nsera = unique(titer_map_train$serum) %>% length()
+  nantigen = unique(titer_map_train$antigen) %>% length()
+  cat(sprintf('in R: n_antigens is %i; n_sera is %i \n', nantigen, nsera))
+  
+  stopifnot(all(titer_map_test$serum %in% titer_map_train$serum))
+  stopifnot(all(titer_map_test$antigen %in% titer_map_train$antigen))
+  fit_stan_MDS(mod = '../../stan/MDS_predict_titer_sparse.stan',
+               observed_titers = titer_map_train$logtiter, # N-vector of observed titers
+               smax = (titer_map_train$serum_potency+titer_map_train$antigen_avidity)/2, # N-vector of smax
+               serum_id = titer_map_train$serum, # N-vector of serum id
+               antigen_id = titer_map_train$antigen, # N- vector of antigen id
+               n_antigens = nantigen, # integer
+               n_sera = nsera, # integer
+               n_dim = n_dim, # integer
+               N_test_set = nrow(titer_map_test),
+               smax_test_set = (titer_map_test$serum_potency + titer_map_test$antigen_avidity)/2,
+               serum_id_test_set = titer_map_test$serum,
+               antigen_id_test_set = titer_map_test$antigen,
+               observed_titers_test_set = titer_map_test$logtiter,
+               chains = 3, # Number of MCMC chains to run
+               cores = parallel::detectCores(logical = F), # For the cluster
+               niter = n_iter,
+               diagnostic_file = NULL
+  )
+  
+}
+
+fit_accross_dims <- function(n_dim_inputs,
+                             immunodominance_flag){
+  ## Fit maps across 1:8 dimensions
+  set.seed(11)
+  inputs <- read_rds(sprintf('inputs/%sD_%s_immunodominance_inputs.rds', n_dim_inputs, immunodominance_flag))
+  split_inputs <- test_train_split(25, 5, inputs$titer_map)
+  stopifnot(1:5 %in% split_inputs$train$antigen)
+  stopifnot(1:5 %in% split_inputs$train$serum)
+  fit_list <- foreach(this_ndim = 1:8) %do% {
+    cat(sprintf('Fitting %s dim model\n', this_ndim))
+    one_fit(titer_map_train = split_inputs$train, 
+            titer_map_test = split_inputs$test,
+            n_dim = this_ndim, 
+            n_chains = 4, 
+            n_iter = 7000,
+            idstring = immunodominance_flag)
+  }
+  names(fit_list) = paste0(1:8, 'D')
+  if(!dir.exists('outputs')) dir.create('outputs')
+  write_rds(fit_list, sprintf('outputs/%sDinputs-%s-fit_list.rds', n_dim_inputs, immunodominance_flag))
+  write_rds(split_inputs, sprintf('outputs/%sDinputs-%s-test_train_split.rds', n_dim_inputs, immunodominance_flag))
 }
