@@ -1,8 +1,8 @@
 ## Infer maps for each set of inputs
 
 rm(list = ls())
-source('../../code.R')
-source('../../multi_epitope_code_sparse_dataset.R')
+source('../../R/code.R')
+source('../../R/multi_epitope_code_sparse_dataset.R')
 library(foreach)
 library(doParallel)
 library(rstan)
@@ -54,8 +54,6 @@ one_fit_wrapper <- function(serum_catalog = read_rds('simulated_inputs/serum_cat
   this.titer.map <-  titer_map %>%
     filter(serum %in% valid_serum_ids)
   ## Fit the even immunodominance maps for 1:8 dimensions
-  serum_list[[this.titer.map$valid_serum_ids]] %>%
-    bind_rows() %>%
   set.seed(11)
   split_titer_map <- test_train_split(nrow(this.titer.map), floor(nrow(this.titer.map)*.2), this.titer.map)
   stopifnot(this.titer.map$antigen %in% split_titer_map$train$antigen)
@@ -109,23 +107,11 @@ run_list <- list(
   )
 
 
-# plot_one_serum_panel <- function(run_list_element){
-# serum_list[run_list_element$this_catalog_selection$serum_id] %>%
-#   bind_rows() %>%
-#   ggplot() +
-#   #geom_point(aes(x = c1_Ab, y = c2_Ab), pch =3, alpha = .5)+
-#   geom_density_2d_filled(aes(x = c1_Ab, y = c2_Ab)) +
-#   geom_point(aes(x = c1_Ag, y = c2_Ag)) +
-#   facet_wrap(.~serum_id, labeller = label_both) +
-#   ggtitle(sprintf('%s: serum antibody density', run_list_element$run_name))+
-#   scale_fill_viridis_d(option = 'rocket', direction = -1)
-#   ggsave(paste0('plots/', run_list_element$run_name, '.png'))
-# }
-# 
-# lapply(run_list, plot_one_serum_panel)
+foreach(this_run_list = run_list) %do% {
+  one_fit_wrapper(serum_catalog = read_rds('simulated_inputs/serum_catalog.rds'), 
+                  full_titer_map = read_rds('simulated_inputs/titer_inputs.rds'), 
+                  valid_serum_ids = this_run_list$this_catalog_selection$serum_id, 
+                  run_name = this_run_list$run_name)
+}
 
 
-one_fit_wrapper(serum_catalog = read_rds('simulated_inputs/serum_catalog.rds'), 
-                full_titer_map = read_rds('simulated_inputs/titer_inputs.rds'), 
-                valid_serum_ids = run_list[[this_run]]$this_catalog_selection$serum_id, 
-                run_name = run_list[[this_run]]$run_name)
