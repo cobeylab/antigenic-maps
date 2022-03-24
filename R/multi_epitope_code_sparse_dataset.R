@@ -34,6 +34,7 @@ generate_ag_coords_random <- function(n_antigens, n_epitopes){
 ## Generate a population of Abs specific to a set of native coordinates
 generate_gaussian_repertoire <- function(native_epitope_coords, ## A data frame with columns for epitope, strain id, and each coordinate
                                          n_epitopes, ## n Epitopes in simulation
+                                         n_dim,
                                          n_ab = 1000, ## Total number of Abs to draw
                                          rel_immuno, ## Vector giving the relative immunodominance of each epitope. Will be normalized. The fraction of Abs specific to epitope i will be proportional to the ith entry.
                                          sigma = .1 ## sd of Ab positions around native_epitope_Coords
@@ -43,18 +44,25 @@ generate_gaussian_repertoire <- function(native_epitope_coords, ## A data frame 
   remainder = n_ab - sum(draw_this_many)
   cat(sprintf('Drawing %i Abs per individual. %i were requested. Remainder is %i.\n', sum(draw_this_many), n_ab, remainder))
   stopifnot(length(draw_this_many) == nrow(native_epitope_coords))
+  stopifnot(n_dim <= sum(grepl(pattern = 'c\\d?.+', x = names(native_epitope_coords))))
+  ## Drop unused antigen_coords columns
+  native_epitope_coords <- select(native_epitope_coords, 'epitope', 'antigen', 'kind', paste0('c', 1:n_dim))
   
   library(foreach)
   foreach(ee = native_epitope_coords$epitope, 
           aa = native_epitope_coords$antigen, 
-          c1.mean = native_epitope_coords$c1, 
-          c2.mean = native_epitope_coords$c2, 
+          this.row = 1:nrow(native_epitope_coords), 
           nn = draw_this_many) %do% {
+            coord.means = native_epitope_coords %>%
+              select(matches('c\\d?.+')) %>%
+              slice(this.row) %>%
+              as.vector
             tibble(epitope = ee,
                    antigen = aa,
-                   kind = 'antibody',
-                   c1 = rnorm(nn, c1.mean, sd = sigma),
-                   c2 = rnorm(nn, c2.mean, sd = sigma))
+                   kind = 'antibody')%>%
+              bind_cols(
+              map_dfc(.x = coord.means, .f = ~{rnorm(nn, .x, sd = sigma)})
+              )
           } %>%
     bind_rows()
 }
@@ -330,18 +338,23 @@ generate_ferret_inputs <- function(antigen_coords, # Data frame of ag coords
                             relative_immunodominance, # vector of relative concentrations (immunodominance) of Abs to each epitope.
                             n_epitopes, # n epitiopes
                             n_antigens,
+                            n_dim,
                             n_abs_per_serum = 500,
                             sigma = 1 # sd of abs around native coord
                             ){ # n antigens
-  
+  stopifnot(n_dim <= sum(grepl(pattern = 'c\\d?.+', x = names(antigen_coords))))
+  ## Drop unused antigen_coords columns
+  antigen_coords <- select(antigen_coords, 'epitope', 'antigen', 'kind', paste0('c', 1:n_dim))
   if(sum(relative_immunodominance) != n_epitopes){warning('Relative concentrations dont sum to n_epitopes. This will rescale the total Ab concentration.')}
   stopifnot(length(unique(antigen_coords$antigen)) == n_antigens)
   stopifnot(length(unique(antigen_coords$epitope)) == n_epitopes)
   
   ## Generate ferret repertoire
   ferret_repertoires <- lapply(1:n_antigens, function(this_ag){
+    
     generate_gaussian_repertoire(native_epitope_coords = antigen_coords %>% filter(antigen == this_ag), 
                                n_epitopes = n_epitopes,
+                               n_dim = n_dim,
                                n_ab = n_abs_per_serum, ## n antibodies per ferret
                                rel_immuno = relative_immunodominance,
                                sigma = sigma)
@@ -350,9 +363,9 @@ generate_ferret_inputs <- function(antigen_coords, # Data frame of ag coords
   
   ## Merge the antigen coordinates with the Ab coordinates to calculate titers
   merged_df <- merge(antigen_coords %>%
-                       select(epitope, antigen, c1, c2),
+                       select(epitope, antigen, matches('c\\d?.+')),
                      ferret_repertoires %>%
-                       select(serum, epitope, antigen, c1, c2),
+                       select(serum, epitope, antigen, matches('c\\d?.+')),
                      by = c('epitope', 'antigen'), 
                      suffixes = c('_Ag', '_Ab'))
   
@@ -965,7 +978,8 @@ get_generalized_titer_errors <- function(stan_fit,
                                           test_set,
                                           observed_titers,
                                           fitted_immunodominance_scheme = 'E1',
-                                          observed_immunodominance_scheme = 'even'){
+                                          observed_immunodominance_scheme = 'even' 
+                                           ){
 
   
   
