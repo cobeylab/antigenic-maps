@@ -1,0 +1,167 @@
+---
+title: "v0.2_LS"
+author: "Katie Gostic"
+date: "1/24/2022"
+output: html_document
+---
+
+# Antigenic cartography
+
+This notebook demonstrates how to use the code in `../code.R` to infer antigenic maps given a matrix of distances between each antigen and antibody/serum in a serological panel.
+
+This code is modeled on the method of Smith et al., 2004 (), which infers the coordinate position of each antigen and serum on the map by minimizing the L2 norm (least squares distance) between the observed distance matrix and the "expected" distance matrix. Expected distances are calculated as the Euclidean distance between the inferred coordinates of each antigen and serum.
+
+The general approach of this notebook is:
+
+* Start with a map (a set of coordinates) representing the positions of n antigens (Ag) and m sera
+* Calculate the distances between each antigen-serum pair
+* Infer the (unknown) coordinate position of each Ag and serum on the map using the observed distance matrix.
+  0. Let $x_i$ represent the coordinates of antigen i, and $y_j$ represent the coordinates of serum j in a d-dimensional map. Let X and Y be matrices holding the coordinates of all antigens and sera, respectively. Input a starting guess for X and Y.
+  1. Using X and Y, estimnate the distance $\phi_{ij}$ between each Ag and serum.
+  2. Calculate the error function: $\sum_{ij} (\phi_{ij}-d_{ij})^2 $, where $\phi_{ij}$ is the distance estimated in the model, and $d_{ij}$ is the observed distance.
+  3. Use the conjugate gradient method in optim() to minimize the error function. (Update the coordinate positions of each Ag and serum until the estimated distances match the observed distances.)
+  
+  
+Caution: 
+
+* The inferred coordinates will be an isometry of the original map (i.e. the infrred coordinates may be shifted, rotated, and reflected relative to the original coordinates, but the pairwise distances between antigens and sera will be preserved.)
+* In practice, any isometry is a valid solution.
+* This demo includes code to align the inferred coordinates with the original coordinates, which makes it easier to visually and numerically compare solutions obtained in different optim() runs, or to compare the inferred coordinates to the original simulated coordinates.
+
+
+
+```{r setup, include=FALSE}
+rm(list = ls())
+library(tidyr)
+filter <- dplyr::filter
+extract <- tidyr::extract
+select <- dplyr::select
+source('../code.R')
+```
+
+## Generate synthetic coordinates
+
+* I haven't yet tested this code in more than 2D
+
+```{r cars}
+coords <- generate_map_coordinates(n_dim = 2, n_antigens = 5, n_sera = 6, map_range = c(-10, 10))
+coords
+```
+
+## Plot the synthetic coordinates
+```{r}
+coords %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, color = kind))
+```
+
+## Get the distances between coordinates
+
+* We only observe the distances between antigen (ag) and antibody/serum (ab), not between ag-ag or ab-ab.
+* Assume all ag-ab distances are observed without error
+
+```{r}
+# Like most of the functions in thei script, `get_ab_ag_distances` is a function defined in `../code.R`
+distmat <- get_ab_ag_distances(ab_coords = filter(coords, kind == 'serum') %>% coord_tibble_to_matrix(),
+                               ag_coords = filter(coords, kind == 'antigen') %>% coord_tibble_to_matrix())
+```
+
+## Use MSD to infer coordinates from distances
+
+General method
+
+* Let $d_{ij}$ represent the observed distance between Ag $i$ and Ab/serum $j$.
+  * Here, $d_{ij}$ is a Euclidean distance, but it can be calculated from titer data (as in Smith et al. 2004) using the formula $d_{ij} = s^{max}_j - s_{ij}  $, where $s^{max}_j$ is the maximum log titer of antiserum $j$ to any strain, and $s_{ij}$ is the log titer of antiserum $j$ to strain $i$.
+* Let $\phi_{ij}$ be the Eucliean distance $x_i$ and $y_j$ (i.e. the estimated distance between antigen i and serum j).
+* Minimize the sum of squares between the observed and expected distances: $\sum_{ij} (d_{ij}-\phi_{ij})^2$.
+  
+
+Notes on optimization
+  
+* Smith et al. 2004 use the conjugate gradients method for optimization.
+* I previously tested other methods (e.g. Nelder-Meade) and found that CG more reliably identifies the global optimum. However, even CG can get stuck at local minima.
+* To ensure that we find the global soltuion, the `fit_MDS_least_squares function` repeats the CG optimization 10 times, using a different set of randomly drawn coordinates to initialize each run. 
+* The `fit_MDS_least_squares function` function returns a list containing (1) the best fit (the fit with the lowest error function value), and (2) all fits, including convergence information.
+* Below we'll explore the 10 different fits from an example run.
+
+```{r}
+# Run the optimization algothirm
+fit_list <- fit_MDS_least_squares(observed_distances = distmat, # Matrix of observed distances (n_antigens x n_sera)
+                                  n_antigens = nrow(distmat), # Scalar, n antigens. Must match nrow(observed_distances).
+                                  n_sera = ncol(distmat),  # Scalar, n sera. Must match ncol(observed_distances)
+                                  n_dim = 2 # Dimensions in the map
+                                  )
+```
+
+## Visualize the 10 fits, each from different initial conditions
+```{r}
+## Function to extact individual fits from the list of outputs
+get_fits_df <- function(fit_obj){
+  tibble(coordinate = fit_obj$par,
+         label = names(fit_obj$par)) %>%
+    tidyr::extract(label, into = c('kind','id', 'dim'), regex = '(a\\w)(\\d)c(\\d)', convert = T) %>%
+    pivot_wider(names_from = dim, values_from = coordinate, names_prefix = 'c') 
+}
+```
+
+```{r}
+## Extract all fits
+all_fits_df <- lapply(fit_list$all_fits, function(ll){ 
+  get_fits_df(ll) %>%
+  mutate(errfun = ll$value,
+         convergence = ll$convergence) }) %>%
+  bind_rows(.id = 'fit')
+```
+
+
+```{r}
+## Plot
+all_fits_df %>%
+  mutate(log10_errfun = log10(errfun)) %>%
+  ggplot()+
+  geom_point(aes(x = c1, y = c2, shape = kind, color = log10_errfun)) +
+  scale_color_viridis_c()+
+  facet_wrap(.~fit, labeller =label_both)
+```
+This plot shows the inferred maps from 10 runs of the optimization algorithm. The runs are identical, except in initial conditions. The dark purple outcomes are the best fits (their error function value is closest to 0.) Note that the good fits (the dark purple maps) are visually isometric -- the look like the same map, rotated and shifted relative to itself. The worse (green and yellow) fits are more variable, and not clearly isometries of each other or of the best fits. These fits are stuck at local, not global minima of the error function.
+
+
+## Visualize the best solution next to the original coords
+
+The solution will be an isometry of the original coords
+```{r}
+best_fit <- get_fits_df(fit_list$best_fit)%>%
+  mutate(kind = ifelse(kind == 'ag', 'antigen', 'serum'))
+```
+
+```{r}
+best_fit_map <- best_fit %>%
+  ggplot() +
+  geom_text(aes(x = c1, y = c2, label = id, color = kind), show.legend = F)
+  
+original_map <- coords %>%
+  ggplot() +
+  geom_text(aes(x = c1, y = c2, color = kind, label = id), show.legend = F)
+
+cowplot::plot_grid(original_map + ggtitle('original map'),
+                   best_fit_map + ggtitle('best fit map'))
+```
+We can see here that the best fit map is an isometry of the original map. Let's try to rotate, reflect, and shift the inferred coordinates so that they match the original basis.
+
+## Translate the mds solution to align with the original coords
+```{r}
+aligned_mds_coords <- align_mds_with_original(mds_coords = best_fit %>% select(c1, c2) %>% as.matrix(), 
+                                              original_coords = coords %>% select(c1, c2) %>% as.matrix())
+```
+
+## Visualize alignment between mds coords and original
+```{r}
+bind_rows(list(original = coords,
+               realigned_mds = coords %>% mutate(c1 = aligned_mds_coords[,1], c2 = aligned_mds_coords[,2])),
+          .id = 'type') %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, shape = type, color = type)) +
+  scale_shape_manual(values = c(16, 3))
+```
+Now we can see that the original and realigned MDS coordinates match.
+
