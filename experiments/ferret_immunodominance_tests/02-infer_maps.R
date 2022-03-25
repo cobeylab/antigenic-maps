@@ -22,9 +22,6 @@ fit_accross_dims(n_dim_inputs = 2, immunodominance_flag = 'E1')
 Sys.time() - t3
 
 
-
-
-
 ## Run 3D fits for even immunodominance
 t1 <- Sys.time()
 fit_accross_dims(n_dim_inputs = 3, immunodominance_flag = 'even')
