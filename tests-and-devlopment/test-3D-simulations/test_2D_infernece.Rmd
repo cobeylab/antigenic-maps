@@ -1,0 +1,315 @@
+---
+title: "Test 2D simulations"
+output: html_notebook
+---
+
+Check that when we simulate antigen coords in 2D with one epitope, that the 3D map recovers the underlying coords and distances.
+
+
+```{r}
+library(rstan)
+library(tidyverse)
+source('../../R/strain_simulation_funs.R')
+source('../../R/stan_funs_sparse_data.R')
+source('../../R/utility-functions.R')
+
+```
+
+
+## Load simulated coordinates
+```{r}
+coords <- read_csv('../../experiments/ferret_immunodominance_tests/inputs/antigen_coords.csv')
+coords
+```
+
+
+```{r}
+inputs <- read_rds('../../experiments/ferret_immunodominance_tests/inputs/2D_E1_immunodominance_inputs.rds')
+inputs
+```
+
+## Check that the titer distances are similar to the 3D euclidean distances
+```{r}
+coordmat_e1 = coords %>% filter(epitope == 1) %>% select(starts_with('c')) %>% as.matrix()
+
+## List all possible comparisons
+check_distances = expand_grid(serum = 1:5, antigen = 1:5)
+## Get E1 euclidean distances
+check_distances$euclidean_distance = foreach(this.serum = check_distances$serum,
+        this.antigen = check_distances$antigen,
+        .combine = 'c') %do% {
+          ag_coords = coordmat_e1[this.antigen,]
+          serum_coords = coordmat_e1[this.serum,]
+          get_euclidean_distance(ag_coords, serum_coords)
+        }
+## Merge withe titer_distances
+check_distances <- check_distances %>%
+  merge(inputs$titer_map %>% select(serum, antigen, titer_distance))
+
+
+check_distances
+```
+
+It does look like the 3D euclidean distances and titer distances track. Let's plot to verify.
+
+```{r}
+check_distances %>%
+  ggplot() +
+  geom_point(aes(x = euclidean_distance, y = titer_distance))+
+  geom_abline(aes(slope=1, intercept = 0))
+```
+
+```{r}
+check_distances_plot = check_distances %>%
+  mutate(xname = sprintf('serum-%s:antigen-%s', serum, antigen)) %>%
+  ggplot() +
+  geom_point(aes(x = xname, y = titer_distance-euclidean_distance)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+check_distances_plot
+```
+  
+
+## Try inferring one map
+```{r}
+## setup
+## code from /tests/test_stan_estimate_titers/02-infer-maps.R
+fit_stan_MDS <- function(
+  mod,
+  observed_titers, # n_antigen x n_antibody matrix of observed_titers
+  smax, # n_antigen x n_antibody matrix of observed smax values
+  n_antigens, # integer
+  n_sera, # integer
+  n_dim, # integer
+  chains = 3, # Number of MCMC chains to run
+  cores = parallel::detectCores(logical = F), # For the cluster
+  niter = 5000,
+  antigen_coords,
+  diagnostic_file = NULL,
+  ...
+) {
+  library(rstan)
+  
+  
+  stopifnot(nrow(observed_titers) == n_antigens)
+  stopifnot(ncol(observed_titers) == n_sera)
+  
+  stopifnot(nrow(smax) == n_antigens)
+  stopifnot(ncol(smax) == n_sera)
+  
+  model <- stan_model(mod)
+  #(print(model))
+  
+  model_input_data <- list(
+    n_antigens = n_antigens,
+    n_sera = n_sera,
+    n_dim = n_dim,
+    observed_titers = observed_titers
+  )
+  
+  initfun <- function(){
+    list(sigma = 1,
+         ag2_c1 = runif(1, 0, 10),
+         strain_coords = matrix(runif((n_antigens-2)*n_dim, -10, 10), n_antigens-2, n_dim),
+         serum_coords =  matrix(runif(n_sera*n_dim, -10, 10), n_sera, n_dim)
+    )
+  }
+  
+  initial_fit <- sampling(model, 
+                          data = model_input_data, 
+                          chains = chains, 
+                          init = initfun,
+                          iter = niter,
+                          cores = min(6, chains),
+                          control = list(adapt_delta = 0.89,
+                                         max_treedepth = 14),
+                          diagnostic_file = diagnostic_file
+  )
+  
+  if(all(summary(initial_fit)$summary[,'Rhat'] <= 1.03)){
+    cat(sprintf('Returning initial fit'))
+    return(initial_fit)
+  }
+  
+  cat(print('Initial fit complete.\nRe-running using initial values from the best chain.\n'))
+  
+  initialize_with_best_chain <- function(initial_fit, nchains){
+    ## Extract the summary of the best chain in terms of mean log posterior
+    best_chain_index = which.max(rstan::extract(initial_fit, permute = F)[,,'lp__'] %>% colMeans())
+    best_chain_summary = rstan::summary(initial_fit)$c_summary[,,best_chain_index]
+    best_chain = rstan::extract(initial_fit, permute = F)[,best_chain_index,]
+    
+    is.antigen.coord = sapply(dimnames(best_chain_summary)$parameter, FUN = function(xx) grepl('antigen_coords', xx))
+    is.serum.coord = sapply(dimnames(best_chain_summary)$parameter, FUN = function(xx) grepl('serum_coords', xx))
+    
+    
+    get_one_list <- function(){
+      ## Output an initial list using the median values from the best chain
+      list(sigma = best_chain_summary['sigma', '50%'],
+           ag2_c1 = best_chain_summary['ag2_c1', '50%'],
+           antigen_coords = matrix(best_chain_summary[is.antigen.coord,'50%'], 
+                                   nrow = n_antigens-2, 
+                                   ncol = n_dim,
+                                   byrow = T),
+           serum_coords = matrix(best_chain_summary[is.serum.coord,'50%'], 
+                                 nrow = n_sera, 
+                                 ncol = n_dim,
+                                 byrow = T))
+    }
+    
+    lapply(1:nchains, function(xx){get_one_list()})
+  }
+  
+  inits <- initialize_with_best_chain(initial_fit, 1)
+  
+  refit <- sampling(
+    model, model_input_data, 
+    chains = 1, 
+    init = inits,
+    iter = niter,
+    control = list(max_treedepth = 14),
+    diagnostic_file = diagnostic_file)
+  
+  if(! all(summary(refit)$summary[,'Rhat'] <= 1.03)){
+    cat(sprintf('Re-doing refit to achieve Rhat < 1.03'))
+    refit <- sampling(
+      model, model_input_data, 
+      chains = 1, 
+      init = inits,
+      iter = niter,
+      diagnostic_file = diagnostic_file)
+  }
+  
+  return(refit)
+}
+
+
+
+
+
+
+one_fit <- function(n_dim,
+                    titer_map,
+                    n_chains = 4,
+                    n_iter= 5000,
+                    idstring){
+  
+  nsera = unique(titer_map$serum) %>% length()
+  nantigen = unique(titer_map$antigen) %>% length()
+  fit_stan_MDS(mod = '../../stan/MDS_predict_titer.stan',
+               observed_titers = format_stan_titers(titer_map),
+               smax = format_stan_smax(titer_map),
+               n_antigens = nsera,
+               n_sera = nantigen,
+               n_dim = n_dim,
+               chains = n_chains,
+               niter = n_iter,
+               diagnostic_file = paste0('diagnostics/', idstring, '_', n_dim, 'D'))
+  
+}
+
+
+```
+
+
+```{r}
+## Fit
+test_fit <- one_fit(n_dim = 2, titer_map = inputs$titer_map, n_chains = 4, n_iter = 7000, idstring = 'test')
+```
+## Lots of divergent transitions warnings here...
+
+```{r}
+fit_summary <- summary(test_fit)$summary 
+names = rownames(fit_summary)
+fit_summary <- as_tibble(fit_summary) %>%
+  mutate(parname = names)
+```
+
+
+## Compare the estimated distances
+
+```{r}
+is_distance <- function(parnames){
+  grepl(pattern = 'map_distances', parnames)
+}
+
+compare_distances <- fit_summary %>% filter(is_distance(parname)) %>%
+  extract(col = parname, into = c('kind', 'antigen', 'serum'), '(map_distances).(\\d).(\\d).', convert = T) %>%
+  select(kind, antigen, serum, mean, sd, n_eff, Rhat) %>%
+  merge(inputs$titer_map %>% select(antigen, serum, titer_distance)) %>%
+  dplyr::rename(estimated_distance = `mean`)
+compare_distances
+```
+
+
+
+
+```{r}
+compare_distances %>%
+  mutate(xname = sprintf('serum-%s:antigen-%s', serum, antigen)) %>%
+  ggplot() +
+  geom_point(aes(x = xname, y = estimated_distance - titer_distance, color = serum-antigen)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+
+
+## Compare the estimated titers
+
+```{r}
+is_titer <- function(parnames){
+  grepl(pattern = 'titer', parnames)
+}
+
+compare_titers <- fit_summary %>% 
+  filter(is_titer(parname)) %>%
+  extract(col = parname, into = c('kind', 'antigen', 'serum'), '(estimated_titers).(\\d).(\\d).', convert = T) %>%
+  select(kind, antigen, serum, mean, sd, n_eff, Rhat) %>%
+  merge(inputs$titer_map %>% select(antigen, serum, logtiter)) %>%
+  dplyr::rename(estimated_titer = `mean`)
+compare_titers
+```
+
+```{r}
+compare_titers %>%
+  mutate(xname = sprintf('serum-%s:antigen-%s', serum, antigen)) %>%
+  ggplot() +
+  geom_point(aes(x = xname, y = estimated_titer - logtiter, color = serum-antigen)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Why can't the 1:1 titers get up high enough?
+
+```{r}
+is_coord <- function(parnames){
+  grepl(pattern = 'coords', parnames)
+}
+
+compare_coords <- fit_summary %>% 
+  filter(is_coord(parname)) %>%
+  extract(col = parname, into = c('kind', 'allele', 'coord'), '(\\w+)_coords.(\\d),(\\d).', convert = T) %>%
+  select(kind, allele, coord, mean, sd, n_eff, Rhat) %>%
+  mutate(allele = ifelse(kind == 'antigen', allele+2, allele)) %>%
+  merge(inputs$ag_ab_coords %>% select(antigen, serum, c1_Ag, c2_Ag) %>% distinct() %>%
+          mutate(allele = antigen) %>%
+          pivot_longer(contains('Ag'), names_to = c('coord'), names_pattern = 'c(\\d)_Ag', values_to = 'input_value') %>%
+          select(allele, coord, input_value)) %>%
+  dplyr::rename(estimated_value = `mean`) %>%
+  select(allele, coord, kind, estimated_value, input_value)
+compare_coords
+```
+
+## This is working
+
+
+```{r}
+compare_coords %>%
+  pivot_wider(names_from = 'coord', values_from = c('estimated_value', 'input_value')) %>%
+  mutate(allele = as.factor(allele)) %>%
+  ggplot() +
+  geom_point(aes(x = input_value_1, y = input_value_2, color = allele, shape = kind)) +
+  geom_point(aes(x = -estimated_value_1, y = estimated_value_2, color = allele), pch = 3) 
+```
+
+
+
