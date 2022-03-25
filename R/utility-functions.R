@@ -67,4 +67,9 @@ get_ab_ag_distances <- function(ab_coords, # matrix of Ab coords. Each column is
 }
 
 
-
+output_dir_check <- function(outdir){
+  if(!dir.exists(outdir)) {
+    dir.create(outdir)
+    cat(sprintf('creating %s directory', outdir))
+  }
+}
