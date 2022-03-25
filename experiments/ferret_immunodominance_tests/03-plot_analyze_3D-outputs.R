@@ -10,13 +10,18 @@ if(!dir.exists('plots')) dir.create('plots')
 summarise <- dplyr::summarise
 rename <- dplyr::rename
 
-outdir = 'plots/2D_MDS'
+
+############# Set this number of dimensions ##############
+this_ndim = 3
+
+outdir = sprintf('plots/%sD_MDS', this_ndim); outdir
 output_dir_check(outdir) # Create the directory if it does not already exist
 
 
 ## Function to parse all outputs
 analyze_one_output_set <- function(fit_list,
                                    test_train_list,
+                                   ab_ag_coords,
                                    immunodominance_flag,
                                    outdir){
   ## Posterior error
@@ -47,7 +52,7 @@ analyze_one_output_set <- function(fit_list,
     select(dimensions, allele, kind, chain, matches('c\\d+$')) %>%
     ggplot() +
     geom_point(aes(x = c1, y = c2, color = chain)) +
-    geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data = even_inputs$ag_ab_coords) +
+    geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data = ab_ag_coords) +
     facet_wrap(.~dimensions)
   map_plot
   ggsave(sprintf('%s/inferred_map_%s_immunodominance.png', outdir, immunodominance_flag), width = 7, height=5, units = 'in', dpi = 200)
@@ -64,20 +69,23 @@ analyze_one_output_set <- function(fit_list,
 
 
 ## Import saved inputs and fits
-even_fit_list <- read_rds('outputs/2Dinputs-even-fit_list.rds')
-even_inputs <- read_rds('inputs/2D_E1_immunodominance_inputs.rds')
-even_test_train = read_rds('outputs/2Dinputs-even-test_train_split.rds')
+this_immunodominance = 'even'
+even_fit_list <- read_rds(sprintf('outputs/%sDinputs-%s-fit_list.rds', this_ndim, this_immunodominance))
+even_inputs <- read_rds(sprintf('inputs/%sD_%s_immunodominance_inputs.rds', this_ndim, this_immunodominance))
+even_test_train <- read_rds(sprintf('outputs/%sDinputs-%s-test_train_split.rds', this_ndim, this_immunodominance))
 
-skewed_fit_list <- read_rds('outputs/2Dinputs-skewed-fit_list.rds')
-skewed_inputs <- read_rds('inputs/2D_skewed_immunodominance_inputs.rds')
-skewed_test_train <- read_rds('outputs/2Dinputs-skewed-test_train_split.rds')
+this_immunodominance = 'skewed'
+skewed_fit_list <- read_rds(sprintf('outputs/%sDinputs-%s-fit_list.rds', this_ndim, this_immunodominance))
+skewed_inputs <- read_rds(sprintf('inputs/%sD_%s_immunodominance_inputs.rds', this_ndim, this_immunodominance))
+skewed_test_train <- read_rds(sprintf('outputs/%sDinputs-%s-test_train_split.rds', this_ndim, this_immunodominance))
 
-E1_fit_list <- read_rds('outputs/2Dinputs-E1-fit_list.rds')
-E1_inputs <- read_rds('inputs/2D_E1_immunodominance_inputs.rds')
-E1_test_train <- read_rds('outputs/2Dinputs-E1-test_train_split.rds')
+this_immunodominance = 'E1'
+E1_fit_list <- read_rds(sprintf('outputs/%sDinputs-%s-fit_list.rds', this_ndim, this_immunodominance))
+E1_inputs <- read_rds(sprintf('inputs/%sD_%s_immunodominance_inputs.rds', this_ndim, this_immunodominance))
+E1_test_train <- read_rds(sprintf('outputs/%sDinputs-%s-test_train_split.rds', this_ndim, this_immunodominance))
 
-E2_inputs = read_rds('inputs/2D_E2_immunodominance_inputs.rds')
-E3_inputs = read_rds('inputs/2D_E3_immunodominance_inputs.rds')
+E2_inputs = read_rds(sprintf('inputs/%sD_E2_immunodominance_inputs.rds', this_ndim))
+E3_inputs = read_rds(sprintf('inputs/%sD_E3_immunodominance_inputs.rds', this_ndim))
 
 
 ## Parse the outputs
