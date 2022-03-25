@@ -708,7 +708,9 @@ run_pca_on_titer_map <- function(titer_matrix){
     ggplot() +
     geom_bar(aes(x = component, y = variance_explained), stat = 'identity') +
     geom_point(aes(x = component, y = cumulative_var_explained), color = 'deepskyblue') +
-    geom_line(aes(x = as.numeric(component), y = cumulative_var_explained), color = 'deepskyblue') 
+    geom_text(aes(x = component, y = cumulative_var_explained+.02, label = sprintf('%2.2f', cumulative_var_explained)))+
+    geom_line(aes(x = as.numeric(component), y = cumulative_var_explained), color = 'deepskyblue') +
+    ylim(c(0, 1.1))
   
   return(list(pca_summary = pca_summary,
               biplot = biplot,
