@@ -1,0 +1,131 @@
+---
+title: "Model constraints"
+output: html_notebook
+---
+
+These are notes on how to efficiently initialize the model and make it identifiable while inferring the map in an arbitrary number of dimensions.
+
+Thanks to Lauren for help formalizing this.
+
+## The problem:
+
+Given a matrix of distances $D = (d_{ij})$ between serum i and strain j, we infer strain and serum coordinates in the antigenic map.
+
+The likelihood assumes:
+
+$$ d_{ij} \sim {N}(\delta_{ij}, \sigma) $$
+
+Where $\delta_{ij} = \sqrt\sum_m (x^{(m)}_i - x^{(m)}_j)^2$ and $x_z$ is an m-dimensional vector representing the inferred  coordinates of serum or strain z.  
+
+We only know the distances between the points, so any isometry (reflection, rotation, or shift) of the map is a valid solution. We need to constrain the locations of some coordinates to make this problem identifiable.
+
+
+## Proposed constraints
+
+### In a one-dimensional map:
+
+* $x_1 = (0)$ (the first coordinate is at the origin)
+* $x_2 = (d_{12})$ (the second coordinate is positive)
+
+Provides a unique solution.
+
+### In a 2D map:
+
+* $x_1 = (0,0)$ (the first coordinate is at the origin)
+* $x_2 = (d_{12},0)$ (the second coordinate is positive)
+
+Provides a unique solution.
+
+### In a 3D map:
+
+* $x_1 = (0,0,0)$ (the first coordinate is at the origin)
+* $x_2 = (d_{12},0,0)$ (the second coordinate is positive)
+* $x_3 = (a,b,0)$
+
+Solve for a, b:
+
+$$ \begin{matrix}
+   d_{13}^2 & = & a^2 &+ &b^2 \\
+   d_{23}^2 & = & (d_{12}-a)^2& + & b^2
+   \end{matrix} $$
+  
+
+Provides a unique solution.
+
+
+### In a 4D map:
+
+* $x_1 = (0,0,0,0)$ (the first coordinate is at the origin)
+* $x_2 = (d_{12},0,0,0)$ (the second coordinate is positive)
+* $x_3 = (a,b,0,0)$
+* $x_4 = (c,d,e,0)$
+
+Solve for a, b, c, d, e:
+
+$$ \begin{matrix}
+   d_{13}^2 & = & a^2 &+ &b^2\\
+   d_{23}^2 & = & (d_{12}-a)^2& + & b^2\\
+   d_{14}^2 & = & c^2 & + & d^2 &+& e^2\\
+   d_{24}^2 & = & (d_{12}-c)^2 & + & d^2 &+& e^2\\
+   d_{34}^2 & = &  (a-c)^2 & + & (b-d)^2 &+& e^2\\
+   \end{matrix} $$
+
+
+... and so on.
+
+
+## Approach:
+
+1. Initalize at these values
+2. Impose strong priors, maybe N(y, 1), where y is the expected value for each constrained coord?
+
+
+## Write a function to initialize in an arbitrary number of dimensions
+```{r}
+generate_inits = function(distmat,
+                   n_dim,
+                   n_antigens,
+                   n_sera){
+  ## Generate random guesses
+  initlist <- list(sigma = 1,
+       strain_coords = matrix(runif(n_antigens*n_dim, -10, 10), n_antigens, n_dim),
+       serum_coords = matrix(runif(n_antigens*n_dim, -10, 10), n_sera, n_dim))
+
+  
+  ## Constrain the first few coordinates
+  constrained_coords = matrix(0, nrow = n_dim, ncol = n_dim)
+  constrained_coords[2,1] = mean(distmat[2,1], distmat[1,2], na.rm = T)
+  
+ if(n_dim > 2){
+  this_fun <- function(pars, 
+                       this_dim){
+    distances = colMeans(rbind(distmat[this_dim, 1:(this_dim-1)], 
+                               distmat[1:(this_dim-1), this_dim]), 
+                         na.rm = T)
+    target = 0
+    for(ii in 1:(this_dim-1)){
+      target = target + abs( sqrt(sum( (pars - constrained_coords[ii,1:(this_dim-1)])^2 )) - distances[ii] )
+      cat(sprintf('target = %2.2f; this dist is %2.2f; this estimate is %2.2f\n', target, distances[ii], sqrt(sum( (c(pars,0) - constrained_coords[ii,])^2 ))))
+    }
+    target
+  }
+  
+  for(this_dim in 3:n_dim){
+    pars = vector(length = this_dim-1) + 1
+    names(pars) = letters[1:this_dim-1]
+    solution = optim(pars, fn = this_fun, this_dim = this_dim, method = 'BFGS', control = list(abstol = 10^-5))
+    constrained_coords[this_dim, 1:(this_dim-1)] = solution$par
+  }
+ }
+  
+  ## Check inference
+  estimated_distances = get_ab_ag_distances(constrained_coords, constrained_coords)
+  stopifnot(all(abs(estimated_distances - distmat[1:n_dim, 1:n_dim]) < 0.1))
+  
+  initlist$strain_coords[1:n_dim,] = constrained_coords
+  if(n_sera == n_antigens){
+    initlist$serum_coords = initlist$strain_coords
+  }
+}
+```
+
