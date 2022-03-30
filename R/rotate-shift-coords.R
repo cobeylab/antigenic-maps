@@ -78,70 +78,72 @@ align_mds_with_original <- function(mds_coords, # Nxd matrix containing all ag a
   ## Shift to align with the original and return
   sapply(1:ncol(rotated_mds), function(cc) rotated_mds[,cc] - rotated_mds[1,cc] +  original_coords[1,cc]) 
   
-  ## Function to extact individual fits from the list of outputs
-  get_fits_df <- function(fit_obj){
-    tibble(coordinate = fit_obj$par,
-           label = names(fit_obj$par)) %>%
-      tidyr::extract(label, into = c('kind','id', 'dim'), regex = '(a\\w)(\\d)c(\\d)', convert = T) %>%
-      pivot_wider(names_from = dim, values_from = coordinate, names_prefix = 'c') 
-  }
+}
+
+## Function to extact individual fits from the list of outputs
+get_fits_df <- function(fit_obj){
+  tibble(coordinate = fit_obj$par,
+         label = names(fit_obj$par)) %>%
+    tidyr::extract(label, into = c('kind','id', 'dim'), regex = '(a\\w)(\\d)c(\\d)', convert = T) %>%
+    pivot_wider(names_from = dim, values_from = coordinate, names_prefix = 'c') 
+}
+
+
+
+## This function takes in a matrix of 2d or 3d coordinates, and shifts/rotates them so that:
+##   1. ag1 coordinates are at the origin
+##   2. ag2 coordinates fall on the x-axis
+standardize_coordinates <- function(coord_mat, 
+                                    ag1_row = 1,
+                                    ag2_row = 2
+){
+  n_dim = ncol(coord_mat) 
+  stopifnot(nrow(coord_mat) >= n_dim)
   
+  ## Shift the whole matrix so that ag1 is at the origin.
+  shifted = shift_to_origin(coord_mat, origin_row = ag1_row)
+  # cat('shifted cords\n')
+  # print(shifted)
   
-  
-  ## This function takes in a matrix of 2d or 3d coordinates, and shifts/rotates them so that:
-  ##   1. ag1 coordinates are at the origin
-  ##   2. ag2 coordinates fall on the x-axis
-  standardize_coordinates <- function(coord_mat, 
-                                      ag1_row = 1,
-                                      ag2_row = 2
-  ){
-    n_dim = ncol(coord_mat) 
-    stopifnot(nrow(coord_mat) >= n_dim)
+  if(n_dim == 3){
+    ## The coordinates of the vector (ag1, ag2) are now the ag2 coordinates, because all ag1 coordinates are 0.
+    ## We want to rotate the map so that ag2 falls on axis 1
+    x_z_projection_vec = c(shifted[2, 1], 0, shifted[2,3])
+    theta = get_theta(v1 = c(1,0,0), v2 = x_z_projection_vec)
+    theta = ifelse(shifted[2,3]>0, 2*pi-theta, theta) ## Rotate in the opposite direction if z is positive
+    rotated_matrix = rotate_about_y_axis_3d(theta = theta, coords = shifted)
     
-    ## Shift the whole matrix so that ag1 is at the origin.
-    shifted = shift_to_origin(coord_mat, origin_row = ag1_row)
-    # cat('shifted cords\n')
-    # print(shifted)
+    ## Now the ag2 vector is in the x-y plane.
+    ## Rotate again about the z-axis to align ag2 with the x axis, and return
+    theta2 = get_theta(c(rotated_matrix[2,1],0,0), rotated_matrix[2,])
+    final_output = rotate_about_z_axis_3d(theta = theta2, 
+                                          coords = rotated_matrix)
     
-    if(n_dim == 3){
-      ## The coordinates of the vector (ag1, ag2) are now the ag2 coordinates, because all ag1 coordinates are 0.
-      ## We want to rotate the map so that ag2 falls on axis 1
-      x_z_projection_vec = c(shifted[2, 1], 0, shifted[2,3])
-      theta = get_theta(v1 = c(1,0,0), v2 = x_z_projection_vec)
-      theta = ifelse(shifted[2,3]>0, 2*pi-theta, theta) ## Rotate in the opposite direction if z is positive
-      rotated_matrix = rotate_about_y_axis_3d(theta = theta, coords = shifted)
-      
-      ## Now the ag2 vector is in the x-y plane.
-      ## Rotate again about the z-axis to align ag2 with the x axis, and return
-      theta2 = get_theta(c(rotated_matrix[2,1],0,0), rotated_matrix[2,])
-      final_output = rotate_about_z_axis_3d(theta = theta2, 
-                                            coords = rotated_matrix)
-      
-      stopifnot(equal_ish(final_output[2,2], 0) & equal_ish(final_output[2,3],0))
-      
-    }else if(n_dim == 2){
-      ## Rotate about the origin to align with x and return
-      theta = get_theta(shifted[ag2_row,], c(1,0))
-      theta = ifelse(shifted[ag2_row,2]>0, 2*pi-theta, theta)
-      final_output = rotate_by_theta_2d(theta = theta, 
-                                        coords = shifted)
-      stopifnot(equal_ish(final_output[2,2],0))
-      
-    }else{
-      stop('standardization only implemented for 2d or 3d maps')
-    }
-    return(final_output)
+    stopifnot(equal_ish(final_output[2,2], 0) & equal_ish(final_output[2,3],0))
+    
+  }else if(n_dim == 2){
+    ## Rotate about the origin to align with x and return
+    theta = get_theta(shifted[ag2_row,], c(1,0))
+    theta = ifelse(shifted[ag2_row,2]>0, 2*pi-theta, theta)
+    final_output = rotate_by_theta_2d(theta = theta, 
+                                      coords = shifted)
+    stopifnot(equal_ish(final_output[2,2],0))
+    
+  }else{
+    stop('standardization only implemented for 2d or 3d maps')
   }
+  return(final_output)
+}
+
+standardize_coordinate_df<-function(coord_df,
+                                    ag1_row,
+                                    ag2_row){
+  # Get standarzied coords
+  standardized_matrix = standardize_coordinates(coord_mat = coord_df %>% select(matches('c\\d')) %>% as.matrix())
   
-  standardize_coordinate_df<-function(coord_df,
-                                      ag1_row,
-                                      ag2_row){
-    # Get standarzied coords
-    standardized_matrix = standardize_coordinates(coord_mat = coord_df %>% select(matches('c\\d')) %>% as.matrix())
-    
-    # Replace the original coordinates in the data frame and return
-    colnames(standardized_matrix) = colnames(coord_df %>% select(matches('c\\d')))
-    coord_df %>%
-      select(-matches('c\\d')) %>%
-      bind_cols(as_tibble(standardized_matrix))
-  }
+  # Replace the original coordinates in the data frame and return
+  colnames(standardized_matrix) = colnames(coord_df %>% select(matches('c\\d')))
+  coord_df %>%
+    select(-matches('c\\d')) %>%
+    bind_cols(as_tibble(standardized_matrix))
+}
