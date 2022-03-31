@@ -1,7 +1,5 @@
-
-
-
-format_stan_inputs <- function(titer_map){
+distance_matrix_format <- function(titer_map){
+  ## Extract titer distances from the titer map and format as a matrix
   antigens = unique(titer_map$antigen)
   sera = unique(titer_map$serum)
   
@@ -15,7 +13,9 @@ format_stan_inputs <- function(titer_map){
   distmat
 }
 
-format_stan_titers <- function(titer_map){
+
+titer_matrix_format <- function(titer_map){
+  ## Extract log titers from the titer map and format as a matrix
   antigens = unique(titer_map$antigen)
   sera = unique(titer_map$serum)
   
@@ -29,7 +29,9 @@ format_stan_titers <- function(titer_map){
   titer_matrix
 }
 
-format_stan_smax <- function(titer_map){
+
+smax_matrix_format <- function(titer_map){
+  ## Extract smax estimates from the titer map and format as a matrix
   antigens = unique(titer_map$antigen)
   sera = unique(titer_map$serum)
   
@@ -45,47 +47,57 @@ format_stan_smax <- function(titer_map){
 }
 
 
+
+### FUNCTION TO FIT THE MODEL IN STAN
 fit_stan_MDS <- function(
-  mod = 'MDS.stan',
-  observed_distances, # n_antigen x n_antibody matrix of distances
-  n_antigens, # integer
-  n_sera, # integer
+  mod, # path to stan model
+  titer_map, ## data frame of antigen id, serum id, titer distance, titer, and smax
   n_dim, # integer
-  chains = 3, # Number of MCMC chains to run
-  cores = parallel::detectCores(logical = F), # For the cluster
+  chains = 4, # Number of MCMC chains to run. The function will require this many cores!
   niter = 5000,
-  antigen_coords,
   diagnostic_file = NULL,
+  coord_prior_sd = 0.01, # sd of the prior used to constrain the first n_dim+1 antigen coordinates
+  debug = FALSE,
   ...
 ) {
   library(rstan)
-
   
-  stopifnot(nrow(observed_distances) == n_antigens)
-  stopifnot(ncol(observed_distances) == n_sera)
+  n_antigens = length(unique(titer_map$antigen))
+  n_sera = length(unique(titer_map$serum))
+  
+  observed_titers = titer_matrix_format(titer_map)
+  observed_distances = distance_matrix_format(titer_map)
+  smax = smax_matrix_format(titer_map)
+  
+  constrained_coords = get_constrainted_coords(distmat = observed_distances, 
+                                               n_dim = n_dim)
+  
+  stopifnot(nrow(observed_titers) == n_antigens)
+  stopifnot(ncol(observed_titers) == n_sera)
+  stopifnot(nrow(smax) == n_antigens)
+  stopifnot(ncol(smax) == n_sera)
   
   model <- stan_model(mod)
-  #(print(model))
+  (print(model))
   
   model_input_data <- list(
     n_antigens = n_antigens,
     n_sera = n_sera,
     n_dim = n_dim,
-    observed_distances = observed_distances
+    antigen_priors = constrained_coords,
+    observed_titers = observed_titers,
+    smax = smax,
+    coord_prior_sd = coord_prior_sd
   )
   
-  initfun <- function(){
-    list(sigma = 1,
-         ag2_c1 = runif(1, 0, 10),
-         strain_coords = matrix(runif((n_antigens-2)*n_dim, -10, 10), n_antigens-2, n_dim),
-         serum_coords =  matrix(runif(n_sera*n_dim, -10, 10), n_sera, n_dim)
-    )
-  }
-  
+  initlist <- lapply(1:n_chains, function(xx) initfun(distmat = observed_distances, 
+                                                      n_dim = n_dim, 
+                                                      n_antigens = n_antigens, 
+                                                      n_sera = n_sera))
   initial_fit <- sampling(model, 
                           data = model_input_data, 
                           chains = chains, 
-                          init = initfun,
+                          init = initlist,
                           iter = niter,
                           cores = min(6, chains),
                           control = list(adapt_delta = 0.89,
@@ -93,7 +105,9 @@ fit_stan_MDS <- function(
                           diagnostic_file = diagnostic_file
   )
   
-  if(all(summary(initial_fit)$summary[,'Rhat'] <= 1.1)){
+  if(debug==TRUE){return(initial_fit)}
+  
+  if(all(summary(initial_fit)$summary[,'Rhat'] <= 1.02)){
     cat(sprintf('Returning initial fit'))
     return(initial_fit)
   }
@@ -111,43 +125,106 @@ fit_stan_MDS <- function(
     
     
     get_one_list <- function(){
-    ## Output an initial list using the median values from the best chain
-    list(sigma = best_chain_summary['sigma', '50%'],
-         ag2_c1 = best_chain_summary['ag2_c1', '50%'],
-         antigen_coords = matrix(best_chain_summary[is.antigen.coord,'50%'], 
-                                nrow = n_antigens-2, 
-                                ncol = n_dim,
-                                byrow = T),
-         serum_coords = matrix(best_chain_summary[is.serum.coord,'50%'], 
-                               nrow = n_sera, 
-                               ncol = n_dim,
-                               byrow = T))
+      ## Output an initial list using the median values from the best chain
+      list(sigma = best_chain_summary['sigma', '50%'],
+           antigen_coords = matrix(best_chain_summary[is.antigen.coord,'50%'], 
+                                   nrow = n_antigens, 
+                                   ncol = n_dim,
+                                   byrow = T),
+           serum_coords = matrix(best_chain_summary[is.serum.coord,'50%'], 
+                                 nrow = n_sera, 
+                                 ncol = n_dim,
+                                 byrow = T))
     }
     
-  lapply(1:nchains, function(xx){get_one_list()})
+    lapply(1:nchains, function(xx){get_one_list()})
   }
-  
-  inits <- initialize_with_best_chain(initial_fit, 1)
+
   
   refit <- sampling(
     model, model_input_data, 
     chains = 1, 
-    init = inits,
+    init = initialize_with_best_chain(initial_fit, 1),
     iter = niter,
     diagnostic_file = diagnostic_file)
   
-  if(! all(summary(refit)$summary[,'Rhat'] <= 1.1)){
-    cat(sprintf('Re-doing refit to achieve Rhat < 1.1'))
+  if(! all(summary(refit)$summary[,'Rhat'] <= 1.02)){
+    cat(sprintf('Re-doing refit to achieve Rhat < 1.02'))
     refit <- sampling(
       model, model_input_data, 
       chains = 1, 
-      init = inits,
+      init = initialize_with_best_chain(initial_fit, 1),
       iter = niter,
       diagnostic_file = diagnostic_file)
   }
-
+  
   return(refit)
 }
+
+
+get_constrainted_coords <-   function(distmat, 
+                                      n_dim,
+                                      verbose = F) {
+  ## Constrain the first few coordinates
+  constrained_coords = matrix(0, nrow = n_dim+1, ncol = n_dim)
+  constrained_coords[2,1] = mean(distmat[2,1], distmat[1,2], na.rm = T)
+  
+  if(n_dim >= 2){
+    this_fun <- function(pars, 
+                         this_dim){
+      distances = colMeans(rbind(distmat[this_dim, 1:(this_dim-1)], 
+                                 distmat[1:(this_dim-1), this_dim]), 
+                           na.rm = T)
+      target = 0
+      for(ii in 1:(this_dim-1)){
+        target = target + abs( sqrt(sum( (pars - constrained_coords[ii,1:(this_dim-1)])^2 )) - distances[ii] )
+        if(verbose) cat(sprintf('target = %2.2f; this dist is %2.2f; this estimate is %2.2f\n', target, distances[ii], sqrt(sum( (pars - constrained_coords[ii,1:(this_dim-1)])^2 ) )))
+      }
+      target
+    }
+    
+    for(this_dim in 3:(n_dim+1)){
+      pars = vector(length = this_dim-1) + 1
+      names(pars) = letters[1:this_dim-1]
+      solution = optim(pars, fn = this_fun, this_dim = this_dim, method = 'BFGS', 
+                       control = list(abstol = 10^-7))
+      constrained_coords[this_dim, 1:(this_dim-1)] = solution$par
+    }
+  }
+  
+  estimated_distances = get_ab_ag_distances(constrained_coords, constrained_coords)   ## Check that estimated distances from constrained coords match inputs
+  if(!all(abs(estimated_distances - distmat[1:(n_dim+1), 1:(n_dim+1)]) < 0.1)){
+    warning(sprintf('max error when inferring constraints is > 0.1. Try rerunning as verbose.'))
+  }
+  
+    print('Estimated distances are:\n')
+    print(estimated_distances)
+    print('Target distances are\n:')
+    print( distmat[1:(n_dim+1),1:(n_dim+1)] )
+    print('\n')
+
+  constrained_coords
+}
+
+
+
+
+
+initfun = function(distmat,
+                   n_dim,
+                   n_antigens,
+                   n_sera){
+  ## Generate random guesses
+  initlist <- list(sigma = 1,
+                   antigen_coords = matrix(runif(n_antigens*n_dim, -10, 10), n_antigens, n_dim),
+                   serum_coords = matrix(runif(n_antigens*n_dim, -10, 10), n_sera, n_dim))
+  constrained_coords = get_constrainted_coords(distmat, n_dim)
+  initlist$antigen_coords[1:(n_dim+1),] = constrained_coords
+  return(initlist)
+}
+
+
+
 
 
 
@@ -256,10 +333,6 @@ extract_long_coords <- function(stan_fit){
   is_log_posterior = parname_contains(parnames, 'lp_')
   
   
-  # ag_coords = raw_fits[,,is_antigen_coord]
-  # serum_coords = raw_fits[,,is_serum_coord]
-  # ag2_coords = raw_fits[,,parname_contains(parnames, 'ag2')]
-  
   #cat(print('checkpoint 1\n'))
   long_antigen_coords <- lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_antigen_coord]) %>% mutate(iter = 1:niter)}) %>%
     bind_rows(.id = 'chain') %>%
@@ -276,21 +349,21 @@ extract_long_coords <- function(stan_fit){
     mutate(allele = as.numeric(allele)) %>%
     pivot_wider(id_cols = c(chain, iter, allele, kind), names_from = coordinate, names_prefix = 'c', values_from = value) 
   
-  #cat(print('checkpoint 3\n'))
-  ag2_long <- lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,parname_contains(parnames, 'ag2')]) %>% mutate(iter = 1:niter)}) %>%
-    bind_rows(.id = 'chain') %>%
-    rename(c1 = value) %>%
-    mutate(allele = 2) %>%
-    mutate(kind = 'antigen') %>%
-    select(chain, iter, allele, kind, c1)
+  # #cat(print('checkpoint 3\n'))
+  # ag2_long <- lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,parname_contains(parnames, 'ag2')]) %>% mutate(iter = 1:niter)}) %>%
+  #   bind_rows(.id = 'chain') %>%
+  #   rename(c1 = value) %>%
+  #   mutate(allele = 2) %>%
+  #   mutate(kind = 'antigen') %>%
+  #   select(chain, iter, allele, kind, c1)
   
-  ## If more than 3 dimensions, pad ag2 data frame with 0s
-  if(any(! (colnames(long_antigen_coords) %in% colnames(ag2_long)) )) {
-    add_these_columns <- colnames(long_antigen_coords)[!(colnames(long_antigen_coords) %in% colnames(ag2_long))]
-    for(cc in add_these_columns){
-      ag2_long[[cc]] = 0
-    }  
-  }
+  # ## If more than 3 dimensions, pad ag2 data frame with 0s
+  # if(any(! (colnames(long_antigen_coords) %in% colnames(ag2_long)) )) {
+  #   add_these_columns <- colnames(long_antigen_coords)[!(colnames(long_antigen_coords) %in% colnames(ag2_long))]
+  #   for(cc in add_these_columns){
+  #     ag2_long[[cc]] = 0
+  #   }  
+  # }
   
   n_allele <- max(long_serum_coords$allele)
   coord_names = long_serum_coords %>% select(matches('c\\d$')) %>% colnames()
@@ -303,8 +376,7 @@ extract_long_coords <- function(stan_fit){
   # (print(ag2_long))
   
   long_coords <- bind_rows(long_antigen_coords,
-                           long_serum_coords,
-                           ag2_long)  %>%
+                           long_serum_coords)  %>%
     complete(allele, kind, chain, fill = as.list(fill_vec)) ## Add 0 coordinates for the fixed antigen at the origin
   long_coords
 }
@@ -353,63 +425,7 @@ negate <- function(x){
 }
 
 
-## Test this tomorrow
 
-infer_human_map <- function(ab_ag_df, # a long data frame of antigen coords and corresponding antibodies with an id column for distinct sera
-                            n_dim,
-                            n_chains = 4,
-                            n_iter = 5000){ 
-  
-  n_antigen = length(unique(ab_ag_df$antigen))
-  n_sera = length(unique(ag_ag_df$serum))
-  
-  ## Calculate the titer panel
-  ## Wrapper to calculate the titer for a given serum and antigen
-  
-  titer_wrapper <- function(this.serum, 
-                            this.antigen){
-    titer = with(extract_titer_inputs(antigen_id = this.antigen, 
-                                      serum_id = this.serum, 
-                                      merged_df = merged_df),
-                 solve_for_titer_multi_epitope(ab_position_list = ab_position_list, 
-                                               relative_concentrations = relative_concentrations, 
-                                               ag_list = ag_list, 
-                                               alpha = .25,
-                                               r = 7)
-    )
-    c('serum' = this.serum, 'antigen' = this.antigen, 'titer' = titer)
-  }
-  
-  titer_map <- with(expand.grid(antigen = 1:n_antigen, serum = 1:n_sera),
-                    mapply(FUN = titer_wrapper, 
-                           this.serum = serum,
-                           this.antigen = antigen)) %>% 
-    t() %>%
-    as_tibble() %>%
-    set_names(c('serum', 'antigen', 'titer')) %>%
-    mutate(logtiter = log2(titer/10)) %>%
-    group_by(serum) %>%
-    mutate(serum_potency = max(logtiter)) %>%
-    ungroup() %>% group_by(antigen) %>%
-    mutate(antigen_avidity = max(logtiter)) %>%
-    ungroup() %>%
-    mutate(titer_distance = (serum_potency+antigen_avidity)/2 - logtiter)
-  
-  ## Fit the stan model
-  fits <- fit_stan_MDS(observed_distances = format_stan_inputs(titer_map), 
-                       n_antigens = n_antigen, 
-                       n_sera = n_sera, 
-                       n_dim = n_dim, 
-                       chains = n_chains,
-                       niter = n_iter)
-  
-  
-  
-  return(list(ag_ab_coords = merged_df,
-              titer_map = titer_map,
-              summary_inferred_coords = extract_summary_coords(fits),
-              stan_fits = fits))
-}
 
 
 get_weighted_centroids <- function(antigen_coords,
@@ -596,44 +612,13 @@ get_titer_error <- function(stan_fit,
 
 get_distance_error <- function(stan_fit, 
                                titer_map){
-  get_distance_error_df(stan_fit,
-                         titer_map) %>%
-    ungroup() %>%
-    summarise(distance_error = sum(pairwise_distance_error)) %>%
-    pull(map_error)
-}
-
-get_distance_error_df <- function(stan_fit, titer_map){
-  raw_fits <- rstan::extract(stan_fit, permuted = F, inc_warmup = F)
-  niter <- dim(raw_fits)[1]
-  nchains <- dim(raw_fits)[2]
-  
-  parnames = dimnames(raw_fits)[3]
-  parname_contains <- function(parnames, this_pattern){sapply(parnames, function(xx) grepl(pattern = this_pattern, x = xx)) %>% as.vector()}
-  is_map_distance = parname_contains(parnames, 'map')
-  
-  lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_map_distance]) %>% mutate(iter = 1:niter)}) %>%
-      bind_rows(.id = 'chain') %>%
-      pivot_longer(contains('map'), names_to = c('antigen', 'serum'), names_pattern = 'map_distances.(\\d+),(\\d+).', values_to = 'map_distance') %>%
-    merge(titer_map, 
-          by = c('serum', 'antigen')) %>%
-    arrange(serum, antigen, chain, iter) %>%
-    group_by(antigen, serum) %>%
-    dplyr::summarise(mean_map_distance = mean(map_distance),
-                     titer_distance = unique(titer_distance),
-                     pairwise_distance_error = mean(sqrt( (map_distance-titer_distance)^2 ))) %>%
-    ungroup()
-}
-
-get_titer_error <- function(stan_fit, 
-                            titer_map){
   get_pairwise_titer_error(stan_fit,
                          titer_map) %>%
     ungroup() %>%
-    summarise(distance_error = sum(pairwise_distance_error),
-              titer_error = sum(pairwise_titer_error)) %>%
-    pull(map_error)
+    summarise(distance_error = sum(pairwise_distance_error)) %>%
+    pull(distance_error)
 }
+
 
 
 get_predictive_error <- function(stan_fit, 

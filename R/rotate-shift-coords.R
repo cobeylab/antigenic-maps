@@ -115,8 +115,9 @@ standardize_coordinates <- function(coord_mat,
     
     ## Now the ag2 vector is in the x-y plane.
     ## Rotate again about the z-axis to align ag2 with the x axis, and return
-    theta2 = get_theta(c(rotated_matrix[2,1],0,0), rotated_matrix[2,])
-    final_output = rotate_about_z_axis_3d(theta = theta2, 
+    theta = get_theta(c(rotated_matrix[2,1],0,0), rotated_matrix[2,])
+    theta = ifelse(rotated_matrix[ag2_row,2]>0, 2*pi-theta, theta)
+    final_output = rotate_about_z_axis_3d(theta = theta, 
                                           coords = rotated_matrix)
     
     stopifnot(equal_ish(final_output[2,2], 0) & equal_ish(final_output[2,3],0))

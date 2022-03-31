@@ -73,3 +73,22 @@ output_dir_check <- function(outdir){
     cat(sprintf('creating %s directory', outdir))
   }
 }
+
+
+
+get_titer_epitope_level <- function(ab_ag_coords,
+                                    this_antigen,
+                                    this_serum,
+                                    this_epitope = 1,
+                                    alpha = .25, 
+                                    r = 7){
+  ## For each antigen, serum combination extract relevant coordinates
+  these_inputs <- extract_titer_inputs(antigen_id = this_antigen, 
+                                       serum_id = this_serum, 
+                                       merged_df = ab_ag_coords)
+  ## Get epitope ditances
+  these_epitope_distances = get_ab_ag_distances(ab_coords = as.matrix(these_inputs$ab_position_list[[this_epitope]]), 
+                                                ag_coords = matrix(these_inputs$ag_list[[this_epitope]], ncol = n_dim))
+  ## Calculate titer and return
+  (1-2*alpha)*sum(2^(r-these_epitope_distances))
+}

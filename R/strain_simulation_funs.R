@@ -338,4 +338,54 @@ get_weighted_centroids <- function(antigen_coords,
               c2 = sum(c2*immunodominance_weights))
 }
 
-
+## This function takes in a matrix of 2d or 3d coordinates, and shifts/rotates them so that:
+##   1. ag1 coordinates are at the origin
+##   2. ag2 coordinates fall on the x-axis
+standardize_coordinates <- function(coord_mat, 
+                                    ag1_row = 1,
+                                    ag2_row = 2
+){
+  n_dim = ncol(coord_mat) 
+  stopifnot(nrow(coord_mat) >= n_dim)
+  
+  ## Shift the whole matrix so that ag1 is at the origin.
+  shifted = shift_to_origin(coord_mat, origin_row = ag1_row)
+  # cat('shifted cords\n')
+  # print(shifted)
+  
+  if(n_dim == 3){
+    ## The coordinates of the vector (ag1, ag2) are now the ag2 coordinates, because all ag1 coordinates are 0.
+    ## We want to rotate the map so that ag2 falls on axis 1
+    x_z_projection_vec = c(shifted[2, 1], 0, shifted[2,3])
+    theta = get_theta(v1 = c(1,0,0), v2 = x_z_projection_vec)
+    theta = ifelse(shifted[2,3]>0, 2*pi-theta, theta) ## Rotate in the opposite direction if z is positive
+    rotated_matrix = rotate_about_y_axis_3d(theta = theta, coords = shifted)
+    
+    ## Now the ag2 vector is in the x-y plane.
+    ## Rotate again about the z-axis to align ag2 with the x axis, and return
+    theta2 = get_theta(c(rotated_matrix[2,1],0,0), rotated_matrix[2,])
+    final_output = rotate_about_z_axis_3d(theta = theta2, 
+                                          coords = rotated_matrix)
+    
+    # cat('\nafter rotation 1:\n')
+    # print(rotated_matrix[2,])
+    # cat('\nafter rotation 2:\n')
+    stopifnot(equal_ish(final_output[2,2], 0) & equal_ish(final_output[2,3],0))
+    
+  }else if(n_dim == 2){
+    ## Rotate about the origin to align with x and return
+    theta = get_theta(shifted[ag2_row,], c(1,0))
+    theta = ifelse(shifted[ag2_row,2]>0, 2*pi-theta, theta)
+    # cat('theta:\n')
+    # print(theta)
+    # cat('original:\n')
+    # print(shifted[ag2_row,])
+    final_output = rotate_by_theta_2d(theta = theta, 
+                                      coords = shifted)
+    stopifnot(equal_ish(final_output[2,2],0))
+    
+  }else{
+    stop('standardization only implemented for 2d or 3d maps')
+  }
+  return(final_output)
+}
