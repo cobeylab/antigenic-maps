@@ -47,6 +47,64 @@ smax_matrix_format <- function(titer_map){
 }
 
 
+get_constrainted_coords <-   function(distmat, 
+                                      n_dim,
+                                      verbose = F) {
+  ## Constrain the first few coordinates
+  constrained_coords = matrix(0, nrow = n_dim+1, ncol = n_dim)
+  constrained_coords[2,1] = mean(distmat[2,1], distmat[1,2], na.rm = T)
+  
+  if(n_dim >= 2){
+    this_fun <- function(pars, 
+                         this_dim){
+      distances = colMeans(rbind(distmat[this_dim, 1:(this_dim-1)], 
+                                 distmat[1:(this_dim-1), this_dim]), 
+                           na.rm = T)
+      target = 0
+      for(ii in 1:(this_dim-1)){
+        target = target + abs( sqrt(sum( (pars - constrained_coords[ii,1:(this_dim-1)])^2 )) - distances[ii] )
+        if(verbose) cat(sprintf('target = %2.2f; this dist is %2.2f; this estimate is %2.2f\n', target, distances[ii], sqrt(sum( (pars - constrained_coords[ii,1:(this_dim-1)])^2 ) )))
+      }
+      target
+    }
+    
+    for(this_dim in 3:(n_dim+1)){
+      pars = vector(length = this_dim-1) + 1
+      names(pars) = letters[1:this_dim-1]
+      solution = optim(pars, fn = this_fun, this_dim = this_dim, method = 'BFGS', 
+                       control = list(abstol = 10^-7))
+      constrained_coords[this_dim, 1:(this_dim-1)] = solution$par
+    }
+  }
+  
+  estimated_distances = get_ab_ag_distances(constrained_coords, constrained_coords)   ## Check that estimated distances from constrained coords match inputs
+  if(!all(abs(estimated_distances - distmat[1:(n_dim+1), 1:(n_dim+1)]) < 0.1)){
+    warning(sprintf('max error when inferring constraints is > 0.1. Try rerunning as verbose.'))
+  }
+  
+  print('Estimated distances are:\n')
+  print(estimated_distances)
+  print('Target distances are\n:')
+  print( distmat[1:(n_dim+1),1:(n_dim+1)] )
+  print('\n')
+  
+  constrained_coords
+}
+
+initfun = function(distmat,
+                   n_dim,
+                   n_antigens,
+                   n_sera){
+  ## Generate random guesses
+  initlist <- list(sigma = 1,
+                   antigen_coords = matrix(runif(n_antigens*n_dim, -10, 10), n_antigens, n_dim),
+                   serum_coords = matrix(runif(n_antigens*n_dim, -10, 10), n_sera, n_dim))
+  constrained_coords = get_constrainted_coords(distmat, n_dim)
+  initlist$antigen_coords[1:(n_dim+1),] = constrained_coords
+  return(initlist)
+}
+
+
 
 ### FUNCTION TO FIT THE MODEL IN STAN
 fit_stan_MDS <- function(
@@ -162,66 +220,6 @@ fit_stan_MDS <- function(
 }
 
 
-get_constrainted_coords <-   function(distmat, 
-                                      n_dim,
-                                      verbose = F) {
-  ## Constrain the first few coordinates
-  constrained_coords = matrix(0, nrow = n_dim+1, ncol = n_dim)
-  constrained_coords[2,1] = mean(distmat[2,1], distmat[1,2], na.rm = T)
-  
-  if(n_dim >= 2){
-    this_fun <- function(pars, 
-                         this_dim){
-      distances = colMeans(rbind(distmat[this_dim, 1:(this_dim-1)], 
-                                 distmat[1:(this_dim-1), this_dim]), 
-                           na.rm = T)
-      target = 0
-      for(ii in 1:(this_dim-1)){
-        target = target + abs( sqrt(sum( (pars - constrained_coords[ii,1:(this_dim-1)])^2 )) - distances[ii] )
-        if(verbose) cat(sprintf('target = %2.2f; this dist is %2.2f; this estimate is %2.2f\n', target, distances[ii], sqrt(sum( (pars - constrained_coords[ii,1:(this_dim-1)])^2 ) )))
-      }
-      target
-    }
-    
-    for(this_dim in 3:(n_dim+1)){
-      pars = vector(length = this_dim-1) + 1
-      names(pars) = letters[1:this_dim-1]
-      solution = optim(pars, fn = this_fun, this_dim = this_dim, method = 'BFGS', 
-                       control = list(abstol = 10^-7))
-      constrained_coords[this_dim, 1:(this_dim-1)] = solution$par
-    }
-  }
-  
-  estimated_distances = get_ab_ag_distances(constrained_coords, constrained_coords)   ## Check that estimated distances from constrained coords match inputs
-  if(!all(abs(estimated_distances - distmat[1:(n_dim+1), 1:(n_dim+1)]) < 0.1)){
-    warning(sprintf('max error when inferring constraints is > 0.1. Try rerunning as verbose.'))
-  }
-  
-    print('Estimated distances are:\n')
-    print(estimated_distances)
-    print('Target distances are\n:')
-    print( distmat[1:(n_dim+1),1:(n_dim+1)] )
-    print('\n')
-
-  constrained_coords
-}
-
-
-
-
-
-initfun = function(distmat,
-                   n_dim,
-                   n_antigens,
-                   n_sera){
-  ## Generate random guesses
-  initlist <- list(sigma = 1,
-                   antigen_coords = matrix(runif(n_antigens*n_dim, -10, 10), n_antigens, n_dim),
-                   serum_coords = matrix(runif(n_antigens*n_dim, -10, 10), n_sera, n_dim))
-  constrained_coords = get_constrainted_coords(distmat, n_dim)
-  initlist$antigen_coords[1:(n_dim+1),] = constrained_coords
-  return(initlist)
-}
 
 
 
@@ -229,70 +227,77 @@ initfun = function(distmat,
 
 
 
-plot_fits <- function(antigen_coords,
-                      fits, 
-                      n_iter,
-                      outdir){
-  trplot <- rstan::traceplot(fits, pars = names(fits))
-  
-  contour_posteriors <- extract_long_coords(fits) %>% 
-    filter(iter %% 5 == 0) %>% ## THIN
-    ggplot()+
-    geom_density_2d(aes(x = c1, y = c2, color = factor(chain))) +
-    facet_grid(kind ~ id)
-  
-  epitope_strain_map <- plot_inferred_original_map(antigen_coords, 
-                                                   fits)
-  
-  outdir = paste0(Sys.Date(), '/', outdir)
-  if(!dir.exists(paste0(Sys.Date()))) dir.create(paste0(Sys.Date()))
-  if(!dir.exists(outdir))  dir.create(outdir)
-  ggsave(paste0(outdir, '/traceplot.png'), plot = trplot)
-  ggsave(paste0(outdir, '/epitope_strain_map.png'), plot = epitope_strain_map)
-  ggsave(paste0(outdir, '/contour_posteriors.png'), plot = contour_posteriors)
-  
-  ## pairs plots
-  png(paste0(outdir, '/antigen_pairs.png'))
-  pairs(fits, pars = names(fits)[grepl(names(fits), pattern = 'antigen.+')])
-  dev.off()
-  png(paste0(outdir, '/serum_pairs.png'))
-  pairs(fits, pars = names(fits)[grepl(names(fits), pattern = 'serum.+')])
-  dev.off()
-  png(paste0(outdir, '/other_pairs.png'))
-  pairs(fits, pars = names(fits)[!grepl(names(fits), pattern = 'antigen.+') & !grepl(names(fits), pattern = 'serum.+')])
-  dev.off()
-  
-  
-  cat(sprintf('plots saved in %s', outdir))
-  return(epitope_strain_map)
-}
 
 
-plot_antigen_coords <- function(antigen_coords){
-  antigen_coords %>%
-    ggplot() +
-    geom_line(aes(x=c1, y = c2, group = epitope), lty = 2, lwd = .1)+
-    geom_point(aes(x = c1, y = c2, shape = antigen, color = epitope))+
-    facet_wrap(.~epitope, labeller = label_both)
-}
 
 
-plot_Ab_Ag_map <- function(ab_ag_df,
-                           antigen_coords){
-  antisera_to_strain = unique(ab_ag_df$antigen)
-  ab_ag_df %>%
-    ggplot() +
-    geom_text(aes(x = c1, y = c2, color = antigen, label = epitope), data = antigen_coords, show.legend = F) + ## All epitope coords
-    geom_point(aes(x = c1_Ab, y = c2_Ab, color = antigen), pch = 3, alpha = .4) + # Ab coords
-    geom_text(aes(x = c1, y = c2, label = epitope), data = antigen_coords %>% filter(antigen == antisera_to_strain)) + # Highlight target antigen coords in black text and a circle
-   # geom_point(aes(x = c1, y = c2), pch = 1, data = antigen_coords %>% filter(antigen == antisera_to_strain)) +
-    guides(color=guide_legend(title="Abs to antigen"))+
-    xlab('c1')+
-    ylab('c2')+
-    ggtitle(sprintf('Antiserum to strain %s', antisera_to_strain))
-}
 
-
+# 
+# 
+# plot_fits <- function(antigen_coords,
+#                       fits, 
+#                       n_iter,
+#                       outdir){
+#   trplot <- rstan::traceplot(fits, pars = names(fits))
+#   
+#   contour_posteriors <- extract_long_coords(fits) %>% 
+#     filter(iter %% 5 == 0) %>% ## THIN
+#     ggplot()+
+#     geom_density_2d(aes(x = c1, y = c2, color = factor(chain))) +
+#     facet_grid(kind ~ id)
+#   
+#   epitope_strain_map <- plot_inferred_original_map(antigen_coords, 
+#                                                    fits)
+#   
+#   outdir = paste0(Sys.Date(), '/', outdir)
+#   if(!dir.exists(paste0(Sys.Date()))) dir.create(paste0(Sys.Date()))
+#   if(!dir.exists(outdir))  dir.create(outdir)
+#   ggsave(paste0(outdir, '/traceplot.png'), plot = trplot)
+#   ggsave(paste0(outdir, '/epitope_strain_map.png'), plot = epitope_strain_map)
+#   ggsave(paste0(outdir, '/contour_posteriors.png'), plot = contour_posteriors)
+#   
+#   ## pairs plots
+#   png(paste0(outdir, '/antigen_pairs.png'))
+#   pairs(fits, pars = names(fits)[grepl(names(fits), pattern = 'antigen.+')])
+#   dev.off()
+#   png(paste0(outdir, '/serum_pairs.png'))
+#   pairs(fits, pars = names(fits)[grepl(names(fits), pattern = 'serum.+')])
+#   dev.off()
+#   png(paste0(outdir, '/other_pairs.png'))
+#   pairs(fits, pars = names(fits)[!grepl(names(fits), pattern = 'antigen.+') & !grepl(names(fits), pattern = 'serum.+')])
+#   dev.off()
+#   
+#   
+#   cat(sprintf('plots saved in %s', outdir))
+#   return(epitope_strain_map)
+# }
+# 
+# 
+# plot_antigen_coords <- function(antigen_coords){
+#   antigen_coords %>%
+#     ggplot() +
+#     geom_line(aes(x=c1, y = c2, group = epitope), lty = 2, lwd = .1)+
+#     geom_point(aes(x = c1, y = c2, shape = antigen, color = epitope))+
+#     facet_wrap(.~epitope, labeller = label_both)
+# }
+# 
+# 
+# plot_Ab_Ag_map <- function(ab_ag_df,
+#                            antigen_coords){
+#   antisera_to_strain = unique(ab_ag_df$antigen)
+#   ab_ag_df %>%
+#     ggplot() +
+#     geom_text(aes(x = c1, y = c2, color = antigen, label = epitope), data = antigen_coords, show.legend = F) + ## All epitope coords
+#     geom_point(aes(x = c1_Ab, y = c2_Ab, color = antigen), pch = 3, alpha = .4) + # Ab coords
+#     geom_text(aes(x = c1, y = c2, label = epitope), data = antigen_coords %>% filter(antigen == antisera_to_strain)) + # Highlight target antigen coords in black text and a circle
+#    # geom_point(aes(x = c1, y = c2), pch = 1, data = antigen_coords %>% filter(antigen == antisera_to_strain)) +
+#     guides(color=guide_legend(title="Abs to antigen"))+
+#     xlab('c1')+
+#     ylab('c2')+
+#     ggtitle(sprintf('Antiserum to strain %s', antisera_to_strain))
+# }
+# 
+# 
 
 plot_inferred_original_map <- function(antigen_coords,
                                        stan_fit,
@@ -398,35 +403,35 @@ extract_summary_coords <- function(stan_fit){
   }
   summary_coords
 }
-
-
-flip_summary_over_x <- function(original_coords,
-                        inferred_summary){
- flip.these.chains <-  merge(original_coords, 
-        inferred_summary %>%
-          filter(kind == 'antigen') %>%
-          rename(antigen = id),
-        by = 'antigen') %>%
-    group_by(chain) %>%
-    summarise(flipped_error = sum((c2.x + c2.y)^2, na.rm = T),
-              original_error = sum((c2.x - c2.y)^2, na.rm = T),
-              flip.me = flipped_error<original_error)
- cat(sprintf('chain %s flipped over x\n', flip.these.chains %>% filter(flip.me) %>% pull(chain)))
- print(flip.these.chains)
- 
- inferred_summary %>% 
-   merge(flip.these.chains) %>%
-   mutate(across(starts_with("c2"), negate))
-  
-}
-
-negate <- function(x){
-  -x
-}
-
-
-
-
+# 
+# 
+# flip_summary_over_x <- function(original_coords,
+#                         inferred_summary){
+#  flip.these.chains <-  merge(original_coords, 
+#         inferred_summary %>%
+#           filter(kind == 'antigen') %>%
+#           rename(antigen = id),
+#         by = 'antigen') %>%
+#     group_by(chain) %>%
+#     summarise(flipped_error = sum((c2.x + c2.y)^2, na.rm = T),
+#               original_error = sum((c2.x - c2.y)^2, na.rm = T),
+#               flip.me = flipped_error<original_error)
+#  cat(sprintf('chain %s flipped over x\n', flip.these.chains %>% filter(flip.me) %>% pull(chain)))
+#  print(flip.these.chains)
+#  
+#  inferred_summary %>% 
+#    merge(flip.these.chains) %>%
+#    mutate(across(starts_with("c2"), negate))
+#   
+# }
+# 
+# negate <- function(x){
+#   -x
+# }
+# 
+# 
+# 
+# 
 
 get_weighted_centroids <- function(antigen_coords,
                                    immunodominance_weights){

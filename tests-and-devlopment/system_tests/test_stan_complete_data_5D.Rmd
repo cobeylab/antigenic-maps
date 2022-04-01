@@ -1,0 +1,173 @@
+---
+title: "Multi epitope code tests"
+output: html_notebook
+---
+
+Write a series of tests to make sure the multi epitope code is doing what we expect
+
+```{r}
+rm(list = ls())
+library(tidyverse)
+library(rstan)
+extract <- tidyr::extract
+filter <- dplyr::filter
+summarise <- dplyr::summarise
+source('../../R/utility-functions.R')
+source('../../R/stan_funs_complete_data.R')
+source('../../R/strain_simulation_funs.R')
+source('../../R/rotate-shift-coords.R')
+
+n_dim = 5
+n_antigens = 15
+n_ab = 0
+n_chains = 4
+n_iter = 5000 # half will be burn in
+```
+
+
+## 1. If there's only one epitope and if all Abs are exactly at the same position as the epitope, then we should recover the underlying map exactly
+
+```{r}
+set.seed(15)
+antigen_coords <- tibble(epitope = rep(c(1:1), each = n_antigens),
+                         antigen = rep(1:n_antigens, 1),
+                         kind = 'antigen',
+                         c1 = generate_ag_coords_random(n_antigens, 1),
+                         c2 = generate_ag_coords_random(n_antigens, 1),
+                         c3 = generate_ag_coords_random(n_antigens, 1),
+                         c4 = generate_ag_coords_random(n_antigens, 1),
+                         c5 = generate_ag_coords_random(n_antigens, 1)) %>%
+  mutate(epitope = as.factor(epitope),
+         antigen = as.factor(antigen))
+```
+
+
+```{r}
+plotly::plot_ly(antigen_coords, x = ~c1, y = ~c2, z = ~c3) %>% 
+  plotly::add_markers() 
+```
+
+```{r}
+plotly::plot_ly(antigen_coords, x = ~c5, y = ~c4, z = ~c3) %>% 
+  plotly::add_markers() 
+```
+
+Generate ferret inputs
+```{r}
+generate_ferret_inputs(antigen_coords, 
+                       relative_immunodominance = c(1), 
+                       n_epitopes = 1, 
+                       n_antigens = n_antigens, 
+                       n_dim = n_dim, 
+                       n_abs_per_serum = 10, 
+                       sigma = .1, 
+                       immunodominance_flag = 'E1', 
+                       outdir = 'system_tests') 
+E1_inputs <- read_rds('system_tests/5D_E1_immunodominance_inputs.rds')
+```
+
+Verify that calculated titers equal expected titers
+
+(See equation 12 of the [Methods][https://www.overleaf.com/project/62152fe1d94828a32964742e].)
+```{r}
+E1_inputs$titer_map$epitope_level_titer = foreach(this_antigen = E1_inputs$titer_map$antigen,
+        this_serum = E1_inputs$titer_map$serum,
+        .combine = 'c') %do% {
+          get_titer_epitope_level(ab_ag_coords = E1_inputs$ag_ab_coords, 
+                                  this_antigen = this_antigen, 
+                                  this_serum = this_serum, 
+                                  this_epitope = 1, 
+                                  alpha = .25, 
+                                  r = 7)
+        }
+
+E1_inputs$titer_map %>% select(serum, antigen, titer, epitope_level_titer)
+```
+
+## Compare titer distances to Euclidean distances
+```{r}
+euclidean_distances <- get_ab_ag_distances(antigen_coords %>% select(starts_with('c')) %>% as.matrix(),
+                                           antigen_coords %>% select(starts_with('c')) %>% as.matrix())
+
+E1_inputs$titer_map %>%
+  rowwise() %>%
+  mutate(euclidean_distance = euclidean_distances[antigen, serum]) %>%
+  ggplot() +
+  geom_point(aes(x = titer_distance,
+                 y = euclidean_distance)) +
+  geom_abline(aes(intercept = 0, slope = 1))
+```
+
+
+
+
+## Titers are as expected
+
+```{r}
+ggplot(E1_inputs$titer_map) +
+  geom_point(aes(x = titer, y = epitope_level_titer)) +
+  geom_abline(aes(slope = 1, intercept = 0))
+```
+
+
+
+
+Infer titer map
+```{r echo=FALSE, include=FALSE}
+source('../../R/stan_funs_complete_data.R')
+distmat <- distance_matrix_format(E1_inputs$titer_map)
+
+constrained_coords <- get_constrainted_coords(distmat = distmat, n_dim = n_dim)
+```
+
+```{r}
+E1_test = fit_stan_MDS(mod = '../../stan/MDS_predict_titer.stan', 
+                       titer_map = E1_inputs$titer_map, 
+                       coord_prior_sd = 0.01,
+                       n_dim = n_dim, 
+                       chains = 4,
+                       cores = 4, 
+                       niter = 5000, 
+                       diagnostic_file = NULL,
+                       debug = T)
+```
+
+
+
+```{r}
+E1_test
+```
+
+
+
+This looks good!
+
+```{r}
+traceplot(E1_test, pars = c('lp__', names(E1_test)[7:11]))
+```
+
+
+
+```{r}
+parnames = names(E1_test)
+pairs(E1_test, pars = grep(pattern = 'coords', parnames, value = T)[1:5])
+```
+
+```{r}
+parnames = names(E1_test)
+pairs(E1_test, pars = grep(pattern = 'coords', parnames, value = T)[6:10])
+```
+
+```{r}
+pairs(E1_test, pars = grep(pattern = 'coords', parnames, value = T)[11:16])
+```
+
+```{r}
+pairs(E1_test, pars = grep(pattern = 'coords', parnames, value = T)[17:23])
+```
+
+
+```{r}
+pairs(E1_test, pars = grep(pattern = 'coords', parnames, value = T)[24:30])
+```
+

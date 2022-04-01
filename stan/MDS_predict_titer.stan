@@ -30,7 +30,7 @@ transformed parameters{
 model {
   // prior on sigma
   sigma ~ normal(1.0, 1.0);
-  // priors on the first n_dim antigen coords to facilitate identifiability
+  // priors on the first n_dim+1 antigen coords to facilitate identifiability
   for(strain in 1:(n_dim+1)){
     for(coord in 1:n_dim){
       antigen_coords[strain][coord] ~ normal(antigen_priors[strain][coord], coord_prior_sd);
