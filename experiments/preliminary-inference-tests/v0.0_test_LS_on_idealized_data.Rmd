@@ -1,14 +1,14 @@
 ---
-title: "Bayesian MDS in Stan"
+title: "Test least squares methos"
 output: html_notebook
 ---
 
-Write and test a Stan model
+Test the least squares method of Smith et al. 2004
 
 ```{r}
-generate_alleles <- function(ndim, nalleles, range = 10){
+generate_alleles <- function(ndim, nalleles, range = 25){
   # Randomly draw coordinates in each dimension
-  sapply(1:ndim, function(dim){runif(nalleles, -range/2, range)}) %>%
+  sapply(1:ndim, function(dim){runif(nalleles, 0, range)}) %>%
     as.tibble() %>%
     set_names(paste0('c', 1:ndim)) %>%
     # Assign allele ids
@@ -17,9 +17,10 @@ generate_alleles <- function(ndim, nalleles, range = 10){
 ```
 
 ```{r}
+n_alleles = 5
 ## Generate coordinates for a separate set of antigens (Ag) and sera (Ab)
-ab_df <- generate_alleles(2, 5)
-ag_df <- generate_alleles(2, 5)
+ab_df <- generate_alleles(2, n_alleles)
+ag_df <- generate_alleles(2, n_alleles)
 
 ab_coords <- as.matrix(ab_df %>% select(starts_with('c')))
 ag_coords <- as.matrix(ag_df %>% select(starts_with('c')))
@@ -61,11 +62,11 @@ get_distances <- function(ab_coords, ag_coords){
 observed_distances = get_distances(ab_coords, ag_coords)
 
 ## Test
-# sqrt(sum((ab_coords[3,]-ag_coords[5,])^2)) == observed_distances[5,3]
-# sqrt(sum((ab_coords[1,]-ag_coords[1,])^2)) == observed_distances[1,1]
-# sqrt(sum((ab_coords[2,]-ag_coords[5,])^2)) == observed_distances[5,2]
-# sqrt(sum((ab_coords[2,]-ag_coords[4,])^2)) == observed_distances[4,2]
-# sqrt(sum((ab_coords[2,]-ag_coords[3,])^2)) == observed_distances[3,2]
+sqrt(sum((ab_coords[3,]-ag_coords[5,])^2)) == observed_distances[5,3]
+sqrt(sum((ab_coords[1,]-ag_coords[1,])^2)) == observed_distances[1,1]
+sqrt(sum((ab_coords[2,]-ag_coords[5,])^2)) == observed_distances[5,2]
+sqrt(sum((ab_coords[2,]-ag_coords[4,])^2)) == observed_distances[4,2]
+sqrt(sum((ab_coords[2,]-ag_coords[3,])^2)) == observed_distances[3,2]
 ```
 
 
@@ -90,18 +91,18 @@ fit_MDS_MLE <- function(
     sum((observed_distances - estimated_distances)^2)
   }
 
-  generate_initial_guess <- function(n_antigens, n_sera, n_dim){
-    ag_c1s <- runif(n_antigens, -10, 10); names(ag_c1s) = paste0('ag', 1:n_antigens, 'c1')
-    ag_c2s <- runif(n_antigens, -10, 10); names(ag_c2s) = paste0('ag', 1:n_antigens, 'c2')
-    ab_c1s <- runif(n_sera, -10, 10); names(ab_c1s) = paste0('ab', 1:n_antigens, 'c1')
-    ab_c2s <- runif(n_sera, -10, 10); names(ab_c2s) = paste0('ab', 1:n_antigens, 'c2')
+  generate_initial_guess <- function(n_antigens, n_sera, n_dim, lower_lim, upper_lim){
+    ag_c1s <- runif(n_antigens, lower_lim, upper_lim); names(ag_c1s) = paste0('ag', 1:n_antigens, 'c1')
+    ag_c2s <- runif(n_antigens, lower_lim, upper_lim); names(ag_c2s) = paste0('ag', 1:n_antigens, 'c2')
+    ab_c1s <- runif(n_sera, lower_lim, upper_lim); names(ab_c1s) = paste0('ab', 1:n_antigens, 'c1')
+    ab_c2s <- runif(n_sera, lower_lim, upper_lim); names(ab_c2s) = paste0('ab', 1:n_antigens, 'c2')
     
     c(ag_c1s, ag_c2s, ab_c1s, ab_c2s)
   }
   
   ## Repeat the fit 5 times from different initial values to verify convergence
   
-  fit_list <- lapply(1:10, function(x) { optim(par = generate_initial_guess(n_antigens, n_sera, n_dim),
+  fit_list <- lapply(1:10, function(x) { optim(par = generate_initial_guess(n_antigens, n_sera, n_dim, lower_lim = 0, upper_lim = 50),
                                              fn = loss_function,
                                              observed_distances = observed_distances,
                                              n_antigens = n_antigens, 
@@ -125,8 +126,10 @@ fit_MDS_MLE <- function(
 
 ```
 
+
+## Run the model to infer coordinates 
 ```{r}
-fits <- fit_MDS_MLE(observed_distances = observed_distances, n_antigens = 5, n_sera = 5, n_dim = 2)
+fits <- fit_MDS_MLE(observed_distances = observed_distances, n_antigens = n_alleles, n_sera = n_alleles, n_dim = 2)
 fits
 ```
 ## Visualize the difference between fits
@@ -157,6 +160,8 @@ all_fits_df %>%
   geom_point(aes(x = c1, y = c2, shape = kind, color = errfun)) +
   facet_wrap(.~fit)
 ```
+Ok, so the coordinates are clearly not converging, but it looks like most of the maps with low error functions (dark points) are isometries of each other?
+
 
 
 ## Compare errorfunctions
@@ -172,109 +177,59 @@ tibble(fit = 1:10,
 
 ## Compare distance matrices
 ```{r}
-get_distances(ab_coords = fits_df %>% dplyr::filter(kind == 'ab') %>% select(starts_with('c')) %>% as.matrix,
-              ag_coords = fits_df %>% dplyr::filter(kind == 'ag') %>% select(starts_with('c')) %>% as.matrix)
-
-observed_distances
-```
-
-## Plot
-```{r}
 fits_df <- get_fits_df(fits$best_fit)
 
-mds_plot <- fits_df %>%
-  ggplot(aes(x = c1, y = c2, color = kind))+
-  geom_text(aes(label = id))
-
-true_plot %>% ggtitle('truth')
-```
-```{r}
-mds_plot %>% ggtitle('mds')
-```
-
-## The MDS can recover the map, but it's often shifted, rotated, and reflected relative to the original
-
-## Try fixing one point to see if we can recover the original better.
-
-
-
-NOTE - below I tried to change basis to recover the original map, but the basis transformation is distorting the MDS solution and this isn't working.
-
-
-
-## Transform to the standard basis:
-
-```{r}
-## Solve for the basis transform
-solve_for_transition_to_standard_basis <- function(mds_coords, original_coords){
-  loss_function <- function(pars, mds_coords, original_coords){
-    v1 = pars['v1']
-    v2 = pars['v2']
-    u1 = pars['u1']
-    u2 = pars['u2']
-    
-    Cprime = t(mds_coords)
-    C = t(original_coords)
-    
-    transition_matrix = matrix(c(v1, v2, u1, u2), 2, 2)
-    
-    sqrt(sum(((transition_matrix %*% Cprime)-C)^2))
-  }
-  
-  optim(par = c(v1 = runif(1, -5, 5), v2 = runif(1, -5, 5), u1 = runif(1, -5, 5), u2 = runif(1, -5, 5)), fn = loss_function, mds_coords = mds_coords, original_coords = original_coords)
-}
-```
-
-```{r}
-## Transform to standard basis
-transform_to_standard_basis <- function(mds_coords, original_coords){
-  stopifnot(all(dim(mds_coords) == dim(original_coords)))
-  transition_coords <- solve_for_transition_to_standard_basis(mds_coords, original_coords)
-  transition_matrix <- matrix(transition_coords$par, 2, 2)
-  transition_matrix %*% t(mds_coords) %>%
-    t() %>%
-    as.tibble() %>%
-    # Vertical and horizontal shift to re-center
-    mutate(V1 = V1 - mean(V1) + mean(original_coords[,1]),
-           V2 = V2 - mean(V2) + mean(original_coords[,2])) %>%
-    set_names(paste0('c', 1:2)) %>%
-    mutate(id = 1:n())
-}
-```
-
-```{r}
-## Apply function
-transformed_mds <- transform_to_standard_basis(mds_coords = fits_df %>% select(starts_with('c')) %>% as.matrix(), 
-                            original_coords = rbind(ag_coords, ab_coords)) %>%
-  mutate(kind = rep(c('ag', 'ab'), each = 5),
-         id = ag_ab_df$id) %>%
-  select(kind, id, starts_with('c'))
-```
-
-
-```{r}
-get_distances(ab_coords = transformed_mds %>% dplyr::filter(kind == 'ab') %>% select(starts_with('c')) %>% as.matrix,
-              ag_coords = transformed_mds %>% dplyr::filter(kind == 'ag') %>% select(starts_with('c')) %>% as.matrix)
 get_distances(ab_coords = fits_df %>% dplyr::filter(kind == 'ab') %>% select(starts_with('c')) %>% as.matrix,
               ag_coords = fits_df %>% dplyr::filter(kind == 'ag') %>% select(starts_with('c')) %>% as.matrix)
+
 observed_distances
 ```
 
 
-
-
-## Visualize fits using mean estimate for each coord
+## Compare distance matrices
 ```{r}
-bind_rows(list('raw_mds' = fits_df, 
-              'actual' = ag_ab_df,
-              'transformed_mds' = transformed_mds
-          ),
-          .id = 'source') %>%
-  mutate(panel = ifelse(source == 'raw_mds', 2, 1)) %>%
-  ggplot() +
-  geom_text(aes(x = c1, y = c2, color = source, label = id)) +
-  facet_grid(.~panel)
+library(foreach)
+all_fitted_distances = foreach(this_fit = 1:10) %do% {
+  distmat = get_distances(ab_coords = all_fits_df %>% 
+                  dplyr::filter(fit == this_fit) %>% 
+                  dplyr::filter(kind == 'ab') %>% 
+                  select(starts_with('c')) %>% as.matrix,
+              ag_coords = all_fits_df %>% 
+                  dplyr::filter(fit == this_fit) %>%
+                  dplyr::filter(kind == 'ag') %>% 
+                select(starts_with('c')) %>% 
+                as.matrix)
+  
+  as_tibble(distmat) %>%
+    mutate(antigen = 1:nrow(.)) %>%
+    pivot_longer(-antigen, names_to = 'serum', names_prefix = 'ab', values_to = 'distance') %>%
+    mutate(serum = as.integer(serum))
+} %>%
+  bind_rows(.id = 'fit') %>%
+  merge(all_fits_df %>% select(fit, errfun), by = 'fit') %>%
+  mutate(antigen_serum = paste0('antigen', antigen, '_serum', serum)) %>%
+  mutate(`errfun<20` = errfun <20 ) 
 ```
 
+## How much variance is there in the inferred distances from each run?
+```{r}
+all_fitted_distances %>%
+  group_by(`errfun<20`, antigen, serum) %>%
+  summarise(meandist = mean(distance),
+            sem = sd(distance)/sqrt(n()))
+```
 
---> This isn't really working. I'm not sure if it's a problem with the model or a mean/median posterior thing.
+very low sem values indicate that in all fits, the values converge to very similar distances
+
+
+
+```{r}
+## Boxplots of fitted distances for each ag-serum pair
+all_fitted_distances %>%
+  ggplot() +
+  geom_boxplot(aes(x = antigen_serum, y = distance, color = `errfun<20`)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  
+```
+
+Here, the tight boxplots (especially for runs with small error functions), we see that the estimated pairwise distances are consistent and reproducible, despite non-dentifiability of the antigen coordinates.
+
