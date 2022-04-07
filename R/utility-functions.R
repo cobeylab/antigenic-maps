@@ -23,19 +23,6 @@ ndim <- function(xx){
 }
 
 
-
-test_train_split <- function(df){
-  ## Split a dataframe into 20% test set and 80% train
-  N = nrow(df)
-  n_test = floor(N*.2)
-  cat(sprintf('Split the %s-row data frame into %s training rows (80%%) and %s test rows (20%%)', N, N-n_test, n_test))
-  test_inds = sample(1:N, size = n_test, replace = F)
-  return(list(test = df[test_inds,],
-              train = df[-test_inds,]
-))
-}
-
-
 coord_tibble_to_matrix <- function(coord_tibble){
   coord_tibble %>%
     select(starts_with('c')) %>%

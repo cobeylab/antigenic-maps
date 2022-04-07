@@ -9,3 +9,7 @@
 *.rds
 *.xls
 *.xlsx
+*.jpg
+*.csv
+*.Rhistory
+*.Rapp*

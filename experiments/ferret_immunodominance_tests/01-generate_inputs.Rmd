@@ -22,13 +22,12 @@ Next script:
 
 
 ```{r}
-source('../../R/utility-functions.R')
 source('../../R/strain_simulation_funs.R')
 library('foreach')
+source('../../R/utility-functions.R')
 
 
-
-n_antigens = 5
+n_antigens = 20
 n_ab = 0
 n_chains = 4
 n_iter = 5000 # half will be burn in
@@ -59,10 +58,10 @@ antigen_coords <- antigen_coords %>%
 modify_these_columns = grep(names(antigen_coords), pattern = 'c\\d?.+')[-1]
 antigen_coords[2, modify_these_columns] = 0
 
-write_csv(antigen_coords[,1:5], paste0('antigen_coords.csv'))
-write_csv(antigen_coords[,1:6], paste0('antigen_coords_3D.csv'))
-write_csv(antigen_coords[,1:7], paste0('antigen_coords_4D.csv'))
-write_csv(antigen_coords[,1:8], paste0('antigen_coords_5D.csv'))
+write_csv(antigen_coords[,1:5], paste0('inputs/antigen_coords.csv'))
+write_csv(antigen_coords[,1:6], paste0('inputs/antigen_coords_3D.csv'))
+write_csv(antigen_coords[,1:7], paste0('inputs/antigen_coords_4D.csv'))
+write_csv(antigen_coords[,1:8], paste0('inputs/antigen_coords_5D.csv'))
 ```
 
 ## Plot the coordinates
@@ -90,7 +89,7 @@ generate_inputs_wrapper <- function(n_dim,
   generate_ferret_inputs(antigen_coords, 
                          relative_immunodominance = immunodominance_vec, 
                          n_epitopes = 3, 
-                         n_antigens = 5, 
+                         n_antigens = n_antigens, 
                          n_dim = n_dim, 
                          immunodominance_flag = immunodominance_flag, 
                          outdir = 'inputs',

@@ -11,36 +11,29 @@ if(!dir.exists('diagnostics')) dir.create('diagnostics')
 
 
 ## Run 2D fits for even immunodominance
-t1 <- Sys.time()
+cat(sprintf('\n \nstart even 2D: \n \n'))
 fit_accross_dims(n_dim_inputs = 2, immunodominance_flag = 'even')
-t2 <- Sys.time()
-t2-t1
+cat(sprintf('\n \nstart skewed 2D: \n \n'))
 fit_accross_dims(n_dim_inputs = 2, immunodominance_flag = 'skewed')
-t3 <- Sys.time()
-t3-t2
+          cat(sprintf('\n \nstart E1 2D: \n \n'))
 fit_accross_dims(n_dim_inputs = 2, immunodominance_flag = 'E1')
-Sys.time() - t3
+
 
 
 ## Run 3D fits for even immunodominance
-t1 <- Sys.time()
+cat(sprintf('\n \nstart even 3D: \n \n'))
 fit_accross_dims(n_dim_inputs = 3, immunodominance_flag = 'even')
-t2 <- Sys.time()
-t2-t1
+cat(sprintf('\n \nstart skewed 3D: \n \n'))
 fit_accross_dims(n_dim_inputs = 3, immunodominance_flag = 'skewed')
-t3 <- Sys.time()
-t3-t2
+cat(sprintf('\n \nstart E1 3D: \n \n'))
 fit_accross_dims(n_dim_inputs = 3, immunodominance_flag = 'E1')
-Sys.time() - t3
+
 
 
 ## Run 5D fits for even immunodominance
-t1 <- Sys.time()
+cat(sprintf('\n \nstart even 5D: \n \n'))
 fit_accross_dims(n_dim_inputs = 5, immunodominance_flag = 'even')
-t2 <- Sys.time()
-t2-t1
+cat(sprintf('\n \nstart skewed 5D: \n \n'))
 fit_accross_dims(n_dim_inputs = 5, immunodominance_flag = 'skewed')
-t3 <- Sys.time()
-t3-t2
+cat(sprintf('\n \nstart E1 5D: \n \n'))
 fit_accross_dims(n_dim_inputs = 5, immunodominance_flag = 'E1')
-Sys.time() - t3

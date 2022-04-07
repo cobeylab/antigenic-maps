@@ -302,7 +302,8 @@ generate_one_serum <- function(native_epitope_coords, ## A data frame with colum
                                 total_ab = 1000,
                                 epitope_immunodominance, # a vector of the relative immunodominances of each epitope. Will be normalized.
                                 strain_dominance, # a vector of the relative dominance of each strain in the repertoire
-                                sigma = .1 ## sd of Ab positions around native_epitope_Coords)
+                                sigma = .1, ## sd of Ab positions around native_epitope_Coords)
+                               n_dim
 ){
   
   n_ab_per_strain <- floor(total_ab*strain_dominance/sum(strain_dominance))
@@ -312,6 +313,7 @@ generate_one_serum <- function(native_epitope_coords, ## A data frame with colum
   foreach(this.strain = strains, this.n_ab = n_ab_per_strain) %do% {
     generate_gaussian_repertoire(native_epitope_coords = filter(native_epitope_coords, antigen == this.strain),
                                  n_epitopes = n_epitopes, 
+                                 n_dim,
                                  n_ab = this.n_ab, 
                                  rel_immuno = epitope_immunodominance, 
                                  sigma = sigma) 

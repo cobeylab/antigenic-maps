@@ -1,0 +1,151 @@
+---
+title: "Bayesian MDS in Stan"
+output: html_notebook
+---
+
+
+Test basic Bayesian MDS, initially using perfectly observed, idealized data.
+
+
+```{r}
+rm(list = ls())
+library(tidyverse)
+source('../../R/strain_simulation_funs.R')
+source('../../R/utility-functions.R')
+```
+
+
+
+## 1. Randomly place 5 antigens and 5 antibodies on a 2D map
+
+* Coordinates are perfectly observed without measurement error
+
+```{r}
+set.seed(7)
+n_antigens = 10
+n_epitopes = 1
+n_sera = 0
+coords <- tibble(epitope = rep(c(1:n_epitopes), each = n_antigens),
+                         antigen = rep(1:n_antigens, n_epitopes),
+                         kind = 'antigen',
+                         c1 = generate_ag_coords_random(n_antigens, n_epitopes),
+                         c2 = generate_ag_coords_random(n_antigens, n_epitopes),
+                         c3 = generate_ag_coords_random(n_antigens, n_epitopes)) %>%
+  mutate(epitope = as.factor(epitope),
+         antigen = as.factor(antigen))
+n_dim = sum(grepl(pattern = 'c\\d', names(coords)))
+
+## Shift so that epitope 1 of antigen 1 falls at the origin
+shift_this_col = function(xx){ xx - xx[1] }
+coords <- coords %>%
+  mutate_at(.vars = vars(matches('c\\d?.+')), .funs = shift_this_col)
+## Set all coords of ag2 epitope 1 to 0 other than c1, so that the ag falls on the x axis
+modify_these_columns = grep(names(coords), pattern = 'c\\d?.+')[-1]
+coords[2, modify_these_columns] = 0
+if(coords[2,4]<0) coords[2,4]=-coords[2,4]
+coords
+```
+
+### Plot coords
+
+```{r}
+cowplot::plot_grid(
+ggplot(coords) +
+  geom_point(aes(x = c1, y = c2)) +
+  ggtitle('Hypothetical strains on a 3D map'),
+ggplot(coords) +
+  geom_point(aes(x = c1, y = c3))
+,
+ggplot(coords) +
+  geom_point(aes(x = c2, y = c3)) 
+)
+```
+
+## Calculate distances between coordinates
+
+* In practices only ab-ag distances are observed, but for prelimiary testing we assume perfect observation (ab-ab and ag-ag distances are observed too).
+
+```{r}
+distances <- matrix(NA, n_antigens, n_antigens)
+for(serum in 1:n_antigens){
+  for(strain in 1:n_antigens){
+    serum_coords = as.vector(coords[serum, 4:6])
+    strain_coords = as.vector(coords[strain, 4:6])
+    distances[serum, strain] = get_euclidean_distance(v1 = serum_coords, v2 = strain_coords)
+  }
+}
+```
+
+
+
+```{r}
+fit_stan_MDS <- function(
+  observed_distances, # vector of delay for each individual in the data
+  n_antigens, 
+  n_sera,
+  n_dim,
+  chains = 1, # Number of MCMC chains to run
+  n_iter = 5000,
+  cores = parallel::detectCores(logical = F),
+  ...
+) {
+  library(rstan)
+  
+  model <- stan_model('../../stan/archive/MDS.stan')
+  
+  initfun <- function(){
+  list(sigma = 1,
+       ag2_c1 = runif(1, 0, 10),
+       antigen_coords = matrix(runif((n_antigens-2)*n_dim, -10, 10), n_antigens-2, n_dim),
+       serum_coords = matrix(runif(n_sera*n_dim, -10, 10), n_sera, n_dim)
+  )
+}
+  
+  model_input_data <- list(
+    n_antigens = n_antigens,
+    n_sera = n_sera,
+    n_dim = n_dim,
+    observed_distances = observed_distances
+  )
+  
+  fit <- sampling(
+    model, model_input_data, chains = chains, cores = cores, init=initfun,
+    ...
+  )
+}
+
+```
+
+```{r}
+fits <- fit_stan_MDS(observed_distances = distances, n_antigens = n_antigens, n_sera = n_antigens, n_dim = n_dim, chains = 1, n_iter = 5000)
+```
+
+
+## Compare the estimated and fitted distances to make sure they match
+```{r}
+compare_distances <- as.data.frame(summary(fits)$summary) %>%
+  rownames_to_column(var = 'parameter') %>%
+  filter(grepl(pattern = 'distance', parameter)) %>%
+  tidyr::extract(parameter, into = c('antigen', 'serum'), regex = 'map_distances.(\\d?).(\\d?).', convert = T) %>%
+  rename(estimated_distance = mean) %>%
+  select(1:3) %>%
+merge(
+as.data.frame(distances) %>% 
+  set_names(paste0(1:n_antigens)) %>%
+  mutate(serum = 1:n_antigens) %>%
+  pivot_longer(-serum, names_to = 'antigen', values_to = 'input_distance') %>%
+  mutate(antigen = as.integer(antigen))
+) 
+```
+
+
+```{r}
+compare_distances %>%
+  ggplot() +
+  geom_point(aes(x = input_distance, y = estimated_distance))
+```
+
+```{r}
+compare_distances %>%
+  filter(abs(input_distance-estimated_distance)>1)
+```
