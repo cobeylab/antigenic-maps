@@ -5,6 +5,7 @@ data {
   //real sigma;
   real observed_distances[n_antigens,n_sera]; // Array of distances
 }
+
 parameters {
   // Note: ag1 coords are all 0 (ag1 falls at the origin)
   //       ag1 coord 1 is free. Ag2 coords 2, 3, etc. are 0 (ag2 is on the x-axis).
