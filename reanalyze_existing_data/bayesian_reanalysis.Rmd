@@ -7,10 +7,14 @@ output: html_notebook
 ```{r setup, include=FALSE}
 rm(list = ls())
 library(tidyr)
+library(dplyr)
 filter <- dplyr::filter
 extract <- tidyr::extract
 select <- dplyr::select
-source('../code.R')
+summarise <- dplyr::summarise
+source('../R/utility-functions.R')
+source('../R/reanalyze-data.R')
+source('../R/stan_funs_sparse_data.R')
 ```
 
 ## Load the data
@@ -20,10 +24,68 @@ As described in `Check_data.Rmd`:
 * Smith_data is the subset of the observations in the Bedford et al. 2014 supplement from the Smith 2004 study. Smith et al. 2004 did not publish their data directly, but about 85% of their observations are available in the Bedford et al. supplement.
 * Bedford_data is all data from the Bedford et al. 2014 supplement, which includes data from many studies including Smith et al. 2004.
 
+
 ```{r}
-Smith_data <- read_csv('Smith_2004_subset_of_Bedford_2014.csv')
-Bedford_data <- read_delim('Bedford_2014_data.txt')
+Bedford_data <- read_delim('Bedford_2014_data.txt') %>% 
+  mutate(num_titer = parse_numeric_titers(titer),
+         logtiter = log2(num_titer)) %>%
+  group_by(virusStrain, serumStrain, source) %>%
+  dplyr::mutate(replicate = 1:n()) %>%
+  mutate(antigen = as.factor(paste0(source, '_', virusStrain, '_', replicate)),
+         serum = as.factor(paste0(source, '_', serumStrain, '_', replicate))) %>%
+  ungroup()
 ```
+
+
+```{r}
+head(Bedford_data)
+```
+
+```{r}
+head(Smith_data)
+```
+
+
+
+
+
+
+
+```{r}
+Smith_data <- read_csv('Smith_2004_subset_of_Bedford_2014.csv') %>% select(virusStrain, virusYear, serumStrain, serumYear, source, titer) %>%
+  mutate(num_titer = parse_numeric_titers(titer),
+         logtiter = log2(num_titer)) %>%
+  group_by(virusStrain, serumStrain, source) %>%
+  dplyr::mutate(replicate = 1:n()) %>%
+  mutate(antigen = as.factor(paste0(source, '_', virusStrain)),
+         serum = as.factor(paste0(source, '_', serumStrain, '_', replicate))) %>%
+  ungroup()
+```
+
+
+```{r}
+head(Smith_data)
+```
+
+## Get logtiter matrix
+```{r}
+smith_logtiter_matrix <- Smith_data %>%
+  select(serum, antigen, logtiter) %>%
+  complete(serum, antigen) %>%
+  pivot_wider(values_from = logtiter, names_from = antigen) 
+write_csv(x = smith_logtiter_matrix, file = 'Smith_logtiter_matrix.csv')
+serum_names = smith_logtiter_matrix %>% pull(serum)
+smith_logtiter_matrix <- smith_logtiter_matrix[,-1] %>% as.matrix()
+rownames(smith_logtiter_matrix) = serum_names
+```
+
+```{r}
+library(irlba)
+irlba(A = smith_logtiter_matrix)
+```
+
+
+
 
 
 # 1. Smith reanalysis
@@ -31,139 +93,7 @@ Bedford_data <- read_delim('Bedford_2014_data.txt')
 ## 1.1 - Get the distance matrix from the titer panel
 
 ```{r}
-# Like most of the functions in thei script, `get_ab_ag_distances` is a function defined in `../code.R`
-distmat <- get_ab_ag_distances(ab_coords = filter(coords, kind == 'serum') %>% coord_tibble_to_matrix(),
-                               ag_coords = filter(coords, kind == 'antigen') %>% coord_tibble_to_matrix())
+Smith_test_train = test_train_split(Smith_data)
+fit_stan_MDS(mod = '../stan/MDS_predict_titer_sparse.stan', titer_map_train = )
 ```
 
-## Infer map using basic stan model
-
-
-To get this working, let's initalize using the exact solution 
-```{r}
-  initfun <- function(){
-    list(sigma = .05,
-         strain_coords = (coords %>% filter(kind == 'antigen') %>% select(starts_with('c')) %>% as.matrix),
-         serum_coords = (coords %>% filter(kind == 'serum') %>% select(starts_with('c')) %>% as.matrix)
-         )
-    }
-```
-
-
-```{r}
-fit_stan_MDS <- function(
-  mod = 'MDS.stan',
-  observed_distances, # n_antigen x n_antibody matrix of distances
-  n_antigens, # integer
-  n_sera, # integer
-  n_dim, # integer
-  chains = 3, # Number of MCMC chains to run
-  cores = parallel::detectCores(logical = F), # For the cluster
-  ...
-) {
-  library(rstan)
-  
-  stopifnot(nrow(observed_distances) == n_antigens)
-  stopifnot(ncol(observed_distances) == n_sera)
-  
-  model <- stan_model('MDS.stan')
-  
-  model_input_data <- list(
-    n_strains = n_antigens,
-    n_sera = n_sera,
-    n_dim = n_dim,
-    observed_distances = observed_distances
-  )
-  
-  fit <- sampling(
-    model, model_input_data, chains = chains, cores = cores, 
-    init = initfun,
-    iter = 5000,
-  #  control = list(adapt_delta = 0.8,
-  #                  max_treedepth = 13),
-    ...
-  )
-}
-
-```
-
-```{r}
-fits <- fit_stan_MDS(observed_distances = distmat, 
-                     n_antigens = n_antigens, 
-                     n_sera = n_sera, 
-                     n_dim = n_dim, 
-                     chains = 1)
-```
-
-## Visualize trace plots
-```{r}
-rstan::traceplot(fits, pars = names(fits))
-```
-
-## Visualize the pairs plots
-```{r}
-pairs(fits, pars = names(fits)[1:5])
-```
-
-## Check the distance matrix
-```{r}
-raw_fits <- rstan::extract(fits)
-
-long_antigen_coords <- lapply(1:n_antigens, function(ll) raw_fits$antigen_coords[,ll,] %>%
-                                                      magrittr::set_colnames(c('c1', 'c2')) %>%
-                           as.tibble() %>%
-                           mutate(id = ll,
-                                  iter = 1:nrow(.),
-                                  kind = 'antigen')) %>%
-                    bind_rows()
-
-long_serum_coords <- lapply(1:n_sera, function(ll) raw_fits$serum_coords[,ll,] %>%
-                                                      magrittr::set_colnames(c('c1', 'c2')) %>%
-                           as.tibble() %>%
-                           mutate(id = ll,
-                                  iter = 1:nrow(.),
-                                  kind = 'serum')) %>%
-                    bind_rows()
-
-summary_coords <- bind_rows(long_antigen_coords,
-          long_serum_coords) %>%
-  group_by(id, kind) %>%
-  summarise(c1.10 = quantile(c1, .1),
-            c1 = median(c1),
-            c1.90 = quantile(c1, .9),
-            c2.10 = quantile(c2, .1),
-            c2 = median(c2),
-            c2.90 = quantile(c2, .9)) %>%
-  ungroup()
-```
-
-## Plot
-```{r}
-cowplot::plot_grid(
-summary_coords %>%
-  ggplot() +
-  geom_point(aes(x = c1, y = c2, color = kind)) +
-  ggtitle('stan') +
-  theme(legend.position = 'none'),
-original_coord_plot +
-  ggtitle('original') +
-  theme(legend.position = 'none')
-)
-```
- 
- Ok, this looks reasonable, but the MDS coords are shifted like crazy.
-
-## Get the distance matrix and compare to the original.
-## If the distances are reasonable, then the inference could be working.
-```{r}
-cat('Inferred distances (median):\n')
-get_ab_ag_distances(ab_coords = summary_coords %>% filter(kind == 'serum') %>% select(matches('c\\d$')) %>% as.matrix(), 
-                    ag_coords = summary_coords %>% filter(kind == 'antigen') %>% select(matches('c\\d$')) %>% as.matrix()
-)
-
-cat('\nActual distances:\n')
-distmat
-```
-
-
-## Ok, this is working, but I think it makes sense to fix the first ag coordinate, and the direction of vec(ag_1, ag_2) so that we don't have to wory about the isometry issue so much.
