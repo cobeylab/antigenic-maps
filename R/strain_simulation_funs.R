@@ -98,7 +98,6 @@ extract_titer_inputs <- function(antigen_id, # To which antigen are we calculati
 ## Solve numerically for titer
 ## Inputs formatted by extract_titer_inputs
 solve_for_titer_multi_epitope <- function(ab_position_list, # A list of E matrices whose rows represent the coordinates of Abs specific to epitope E. Each matrix should be of dimension  [n_E, d].
-                                          relative_concentrations = NULL, # An optional vector that scales the immunodominance of each epitope. (Assume in eq. 18 that concentration is proportional to the cognate epitope's immunodominance)
 ag_list, # A list of length E giving the coordinate vectors of each epitope within the antigen
 alpha, # Ab potency (equal and fixed across all Abs)
 r # Maximum log2 titer
@@ -106,20 +105,21 @@ r # Maximum log2 titer
   
   # cat(sprintf('ag list length is %i; ab list lenght is %i', length(ag_list), length(ab_position_list)))
   stopifnot(length(ag_list)==length(ab_position_list))
-  valid_epitopes = (1:length(relative_concentrations))[relative_concentrations>0]
-  if(length(valid_epitopes) < 1) relative_concentrations = rep(1, length(ab_position_list))
-  stopifnot(length(valid_epitopes) == length(ab_position_list))
+  # valid_epitopes = (1:length(relative_concentrations))[relative_concentrations>0]
+  # if(length(valid_epitopes) < 1) relative_concentrations = rep(1, length(ab_position_list))
+  # stopifnot(length(valid_epitopes) == length(ab_position_list))
   
   
-  titer_fun <- function(z, ab_position_list, x_ag, alpha, r, relative_concentrations){ 
+  titer_fun <- function(z, ab_position_list, x_ag, alpha, r, concentration = 1, mu = 1/2){ 
     
     # Each eptiope is a factor in Eq 13. This function calculates those factors
     one_factor <- function(ab_positions, # matrix of Ab positions to one epitope
                            x_ag = x_ag, # vector of epitope's position
                            z, # titer (we'll solve for this later)
                            alpha, # potency
-                           r,  # max titer
-                           this_immunodominance # the immunodominance (relative concentration) of this epitope
+                           r,
+                           concentration = 1,
+                           mu
     ){
       # cat(sprintf(' ID is %2.1f', this_immunodominance))
       ab_distances = apply(ab_positions, 1, FUN = function(v1){
@@ -127,17 +127,17 @@ r # Maximum log2 titer
       })
       
       ab_affinities = 2^(r-ab_distances) # Eq 6
-      scaled_affinities = ab_affinities*this_immunodominance
+      scaled_affinities = ab_affinities*concentration
       this_factor = (1+alpha/z*sum(scaled_affinities))/(1+1/z*sum(scaled_affinities)) # Eq 13
       return(this_factor)
       
     }
     ## This function calculates each factor and takes the product to solve for titer
-    factors<-mapply(FUN = one_factor, ab_positions = ab_position_list, x_ag = ag_list, this_immunodominance = relative_concentrations, z = z, alpha = alpha, r = r)  
+    factors<-mapply(FUN = one_factor, ab_positions = ab_position_list, x_ag = ag_list, z = z, alpha = alpha, r = r)  
     # cat(print('\n'))
     # cat(print('factors are\n'))
     # print(factors)
-    prod(factors) - 1/2
+    prod(factors) - mu
   }
   
   ## Solve for titer and return
@@ -147,7 +147,8 @@ r # Maximum log2 titer
                             x_ag = ag_list, 
                             alpha = alpha, 
                             r = r,
-                            relative_concentrations = relative_concentrations,
+                            concentration = 1,
+                            mu = 1/2,
                             tol =  .Machine$double.eps^.5)       
   
   ## Verify that the solution returns 0
@@ -169,9 +170,10 @@ generate_ferret_inputs <- function(antigen_coords, # Data frame of ag coords
                             n_antigens,
                             n_dim,
                             n_abs_per_serum = 500,
-                            sigma = 1, # sd of abs around native coord
+                            sigma = .1, # sd of abs around native coord
                             immunodominance_flag,
-                            outdir = 'inputs'
+                            outdir = 'inputs',
+                            alpha = .25, r = 7
                             ){ # n antigens
   stopifnot(n_dim <= sum(grepl(pattern = 'c\\d?.+', x = names(antigen_coords))))
   ## Drop unused antigen_coords columns
@@ -209,10 +211,9 @@ generate_ferret_inputs <- function(antigen_coords, # Data frame of ag coords
                                       serum_id = this.serum, 
                                       merged_df = merged_df),
                  solve_for_titer_multi_epitope(ab_position_list = ab_position_list, 
-                                               relative_concentrations = relative_immunodominance, 
                                                ag_list = ag_list, 
-                                               alpha = .25,
-                                               r = 7)
+                                               alpha = alpha,
+                                               r = r)
     )
     c('serum' = this.serum, 'antigen' = this.antigen, 'titer' = titer)
   }
@@ -297,13 +298,100 @@ plot_inferred_original_map <- function(antigen_coords,
 
 
 
+
+
+generate_OAS_serum <- function(existing_Ab_coords, ## ab_ag_coords data frame with columns: `epitope`, c1, c2, ... cn
+                               strain_coords, ## data frame with columns: epitope, c1, c2, ... cn
+                               total_ab = 1000, ## Total Abs to return
+                               preserve_epitope_immunodominance = FALSE, # if TRUE, return the fraction of Abs specific to each epitope as in the original serum. if FALSE, let the relative affinities of existing Abs to their cognate epitopes dictate immunodominance.
+                               this_antigen,
+                               sigma = .1,
+                               r=7){
+  
+  stopifnot('epitope' %in% colnames(existing_Ab_coords))
+  stopifnot('epitope' %in% colnames(strain_coords))
+  stopifnot(any(grepl('c\\d?', x = colnames(strain_coords))))
+  stopifnot(any(grepl('c\\d?_Ab', x = colnames(existing_Ab_coords))))
+  existing_Ab_coords <- existing_Ab_coords %>% select(epitope, matches('c\\d?_Ab'))
+  strain_coords <- strain_coords %>% select(epitope, matches('c\\d?'))
+  n_dim = sum(grepl(pattern = 'c\\d?', colnames(strain_coords)))
+  stopifnot(n_dim == sum(grepl(pattern = 'c\\d?', colnames(existing_Ab_coords))))
+  existing_Ab_coords <- set_names(existing_Ab_coords, c('epitope', gsub(pattern = '(c\\d?)_Ab', replacement = '\\1', x = colnames(existing_Ab_coords)[-1])))
+  
+  if(preserve_epitope_immunodominance){
+    ## Calculate the number of Abs per epitope in the original serum
+    n_epitopes = length(unique(existing_Ab_coords$epitope))
+    epitope_counts = existing_Ab_coords %>% group_by(epitope) %>% summarise(n = n()) %>% arrange(epitope) %>% pull(n)
+    nAbs_per_epitope = floor(total_ab*(epitope_counts/sum(epitope_counts)))
+    remainder = total_ab-sum(nAbs_per_epitope)
+    nAbs_per_epitope = nAbs_per_epitope + rmultinom(n = 1, size = remainder, prob = rep(1, n_epitopes)) %>% t()
+    stopifnot(sum(nAbs_per_epitope) == total_ab)
+    
+    library(foreach)
+    ## For each epitope...
+    new_Abs = foreach(this_epitope = 1:n_epitopes,
+        this_nAb = nAbs_per_epitope) %do% {
+          ## START MODIFYING HERE
+        candidate_locations = rbind(strain_coords %>% filter(epitope == this_epitope) %>% select(matches('c\\d?')),
+                                    existing_Ab_coords %>% filter(epitope == this_epitope) %>% select(matches('c\\d?')))
+        distances_to_candidate_locations = apply(candidate_locations, 1, function(vv){get_euclidean_distance(vv, candidate_locations[1,])})
+        affinities = 2^(r-distances_to_candidate_locations)
+        ## Select locations
+       #new_location_weights = rmultinom(n = 1, size = nrow(candidate_locations), prob = affinities/sum(affinities)) 
+        new_location_indices =  sample(x = 1:nrow(candidate_locations), size = this_nAb, replace = T, prob = affinities) 
+        new_location_coords = as.data.frame(candidate_locations)[new_location_indices, ]
+        stopifnot(nrow(new_location_coords)==this_nAb)
+        
+        ## And for each location...
+        foreach(this.row = 1:nrow(new_location_coords)) %do% {
+                  coord.means = new_location_coords[this.row, ]
+                  tibble(epitope = this_epitope,
+                         antigen = this_antigen,
+                         kind = 'antibody')%>%
+                    bind_cols(
+                      map_dfc(.x = coord.means, .f = ~{rnorm(1, .x, sd = sigma)})
+                    )
+                } %>%
+          bind_rows()
+        } %>%
+      bind_rows()
+  }else{
+    candidate_locations = rbind(strain_coords,
+                                existing_Ab_coords)
+    candidate_epitopes = candidate_locations$epitope
+    candidate_locations = select(candidate_locations, -epitope)
+    distances_to_candidate_locations = apply(candidate_locations, 1, function(vv){get_euclidean_distance(vv, candidate_locations[1,])})
+    affinities = 2^(r-distances_to_candidate_locations)
+    new_location_indices =  sample(x = 1:nrow(candidate_locations), size = total_ab, replace = T, prob = affinities) 
+    new_location_coords = as.data.frame(candidate_locations)[new_location_indices, ]
+    new_epitopes = candidate_epitopes[new_location_indices]
+    stopifnot(nrow(new_location_coords)==total_ab)
+    ## And for each location...
+    library(foreach)
+    new_Abs = foreach(this.row = 1:nrow(new_location_coords),
+                      this_epitope = new_epitopes) %do% {
+      coord.means = new_location_coords[this.row, ]
+      tibble(epitope = this_epitope,
+             antigen = this_antigen,
+             kind = 'antibody')%>%
+        bind_cols(
+          map_dfc(.x = coord.means, .f = ~{rnorm(1, .x, sd = sigma)})
+        )
+    } %>%
+      bind_rows()
+  }
+  new_Abs
+}
+
+
+
 generate_one_serum <- function(native_epitope_coords, ## A data frame with columns for epitope, strain id, and each coordinate
                                 n_epitopes,
                                 total_ab = 1000,
                                 epitope_immunodominance, # a vector of the relative immunodominances of each epitope. Will be normalized.
                                 strain_dominance, # a vector of the relative dominance of each strain in the repertoire
                                 sigma = .1, ## sd of Ab positions around native_epitope_Coords)
-                               n_dim
+                                n_dim
 ){
   
   n_ab_per_strain <- floor(total_ab*strain_dominance/sum(strain_dominance))

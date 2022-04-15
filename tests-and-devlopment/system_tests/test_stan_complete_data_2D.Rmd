@@ -12,10 +12,10 @@ library(rstan)
 extract <- tidyr::extract
 filter <- dplyr::filter
 summarise <- dplyr::summarise
-source('../R/utility-functions.R')
-source('../R/stan_funs_complete_data.R')
-source('../R/strain_simulation_funs.R')
-source('../R/rotate-shift-coords.R')
+source('../../R/utility-functions.R')
+source('../../R/stan_funs_complete_data.R')
+source('../../R/strain_simulation_funs.R')
+source('../../R/rotate-shift-coords.R')
 
 n_dim = 2
 n_antigens = 5
@@ -97,9 +97,15 @@ ggplot(E1_inputs$titer_map) +
 euclidean_distances <- get_ab_ag_distances(antigen_coords %>% select(starts_with('c')) %>% as.matrix(),
                                            antigen_coords %>% select(starts_with('c')) %>% as.matrix())
 
+wrapperfun <- function(antigen, serum){
+  mapply(antigen, serum, FUN = function(antigen, serum){
+  euclidean_distances[antigen, serum]
+})
+}
+
 E1_inputs$titer_map %>%
   rowwise() %>%
-  mutate(euclidean_distance = euclidean_distances[antigen, serum]) %>%
+  mutate(euclidean_distance = wrapperfun(antigen, serum)) %>%
   ggplot() +
   geom_point(aes(x = titer_distance,
                  y = euclidean_distance)) +
@@ -109,14 +115,14 @@ E1_inputs$titer_map %>%
 
 Infer titer map
 ```{r echo=FALSE, include=FALSE}
-source('../R/stan_funs_complete_data.R')
+source('../../R/stan_funs_complete_data.R')
 distmat <- distance_matrix_format(E1_inputs$titer_map)
 
 constrained_coords <- get_constrainted_coords(distmat = distmat, n_dim = n_dim, verbose = F)
 ```
 
 ```{r}
-E1_test = fit_stan_MDS(mod = '../stan/MDS_predict_titer.stan', 
+E1_test = fit_stan_MDS(mod = '../../stan/MDS_predict_titer.stan', 
                        titer_map = E1_inputs$titer_map, 
                        n_dim = n_dim, chains = 4, niter = 5000, 
                        diagnostic_file = NULL, coord_prior_sd = 0.01,
@@ -125,12 +131,12 @@ E1_test = fit_stan_MDS(mod = '../stan/MDS_predict_titer.stan',
 
 
 ```{r}
-E1_test
+summary(E1_test)
 ```
 
 
 
-In 3D, we're seeing divergent transitions after warmup. Is this an identifiability issue?
+Traceplots look good
 
 ```{r}
 traceplot(E1_test, pars = 'lp__')
@@ -142,6 +148,7 @@ traceplot(E1_test, pars = 'lp__')
 parnames = names(E1_test)
 pairs(E1_test, pars = grep(pattern = 'coords', parnames, value = T)[1:5])
 ```
+Pairs plots look good
 
 ```{r}
 parnames = names(E1_test)
@@ -254,8 +261,8 @@ ggplot(E1_inputs_2$titer_map) +
 
 Infer titer map
 ```{r echo=FALSE, include=FALSE}
-source('../R/stan_funs_complete_data.R')
-E1_test_v2 = fit_stan_MDS(mod = '../stan/MDS_predict_titer.stan', 
+source('../../R/stan_funs_complete_data.R')
+E1_test_v2 = fit_stan_MDS(mod = '../../stan/MDS_predict_titer.stan', 
                           titer_map = E1_inputs_2$titer_map, 
                           n_dim = n_dim, chains = 4, niter = 5000, 
                           diagnostic_file = NULL, coord_prior_sd = 0.01, 
