@@ -1,0 +1,345 @@
+---
+title: "Ha_Nam individual distance analysis"
+output: html_notebook
+---
+
+# Background
+
+** Definition of antigenic distance **
+
+The antigenic distance between influenza strains is typically estimated from serological panel data estimated using antisera from naive lab ferrets infected with a single reference strain.
+Each ferret generates a primary antibody response specific to the infecting strain, i.
+The titer of each antiserum against a panel of heterologous strains indicates how well antibodies specific to strain i cross-react with other strains (j).
+If an antiserum's heterologous titer to strain j is much less than the heterologous titer to strain i, then we conclude that the antigenic distance $d_{ij}$ is large, and that i and j weakly cross-react.
+Formally, if $s_{ii}$ represents the homologous log$_2$ titer between antiserum i and strain i, and $s_{ij}$ represents the heterologous log$_2$ titer to j, then antigenic distance is defined as
+
+$$ d_{ij} = s_{ii}-s_{ij}  $$ (equation 1)
+
+(Neher et al. 2016). Titers are often reported on the log$_2$ scale to reflect 2-fold serial dilutions used in titer measurement. Equation 1 summarized the conceptual foundaiton for many distance calculations, although some studies use slight variations of this definition, e.g. by adjusting for serum potency and strain avidity (Bedford et al. 2014; Smith et al. 2004; Cai et al. 2010).
+
+
+** Interpretation **
+
+Strictly speaking, antigenic distances should be interpreted as the extent to which antibodies in a primary ferret antiserum rasied against strain i cross-react with strain j.
+But in practice, antigenic distance estimates are widely used to model population susceptibilty, to estimate the novelty (and implicitly the fitness) of new variants, and to guide vaccine strain selection.
+In these contexts, ferret distance estimates are used as a proxy for the expected level of cross-reactivity between a human antibody reponse to a recent strain i, and a new variant j.
+There is a need to systematically assess whether ferret distances accurately and precisely estimate individual cross-reactivity (and heterogeneity in it) against new antigenic variants of influenza, Sars-Cov-2, etc.
+
+
+# Approach
+
+We calculate **individual distances** using sera collected from individuals who were recently infected by or vaccinated with a known strain. Specifically, this analysis focuses on data from the Ha Nam cohort, available in the supplement of Fonville et al. 2014. This dataset includes sera from:
+
+* 12 individuals from a household cohort study with PCR-confirmed infections (all unvaccinated)
+* 56 individuals from a household cohort study with no known history of PCR-confirmed infection (all unvaccinated)
+* 106 individuals vaccinated in 1995 with A/Nangchang933/95
+* 128 individuals vaccinatd in 1997 with A/Sydney/5/97
+* 82 individuals vacinated in 2009 with ??
+* 82 individuals vaccinated in 2010 with ??
+
+
+## 12 individuals with PCR-confirmed infections 
+(all unvaccinated)
+
+```{r include=FALSE}
+rm(list = ls())
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+filter <- dplyr::filter
+source('analysis_functions.R')
+```
+
+
+
+## Define functions
+
+
+
+
+
+
+
+
+
+## Read in antigenic distance data
+```{r}
+if(!file.exists('../processed_data/calculated_strain_distances.csv')){
+  cat('calculating map distances -- this will take a minute')
+  calculate_and_save_map_distances()
+}
+dist_table = read_csv('../processed_data/calculated_strain_distances.csv')
+```
+
+
+## Read in HaNam titers
+
+```{r include=FALSE}
+HaNam_titers = read_csv('../raw_data/Fonville_2014_TableS3.csv') %>% ## HaNam cohort titers
+  mutate_at(-c(1,2), .funs = ~HaNam_titers_to_numeric(.)) %>% ## Convert titer values to numeric. Report undetectable = 5, and endpoint = 1280
+  pivot_longer(-c(1,2), names_to = 'test_strain', values_to = 'titer') %>%
+  filter(!test_strain == 'A/PHILIPPINES/472/2002_EGG') %>% ## Filter out the Egg adapted version of A/PHILIPPINES/472/2002
+  mutate(test_strain = ifelse(test_strain == 'A/PHILIPPINES/427/2002_MDCK', 'A/PHILIPPINES/472/2002', test_strain)) %>%
+  mutate(logtiter = to_log(titer)) %>%
+  tidyr::extract(col = test_strain, into = 'test_strain_year', regex = '/(\\d+)$', remove = F) %>%
+  mutate(test_strain_year = clean_years(test_strain_year)) %>%
+  merge(read_csv('../processed_data/YOB_inferred.csv'), by = 'Subject number') %>% ## Merge with Kangchon's annotation of PCR-confirmed infections %>%
+  merge(read_csv('../processed_data/HaNam_strains.csv'), by = 'test_strain') %>%
+  mutate(test_strain = full_name) %>%
+  select(`Subject number`, YOB, `PCR+`, Seroconversion, `Infection Time`, `Sample year`, test_strain, is_vietnam_strain, test_strain_year, titer, logtiter, days_PCR_swab_to_serum_draw) 
+```
+
+## Extact PCR-confirmed infections from HaNam titer data
+
+```{r}
+PCR_infections = HaNam_titers %>%
+  dplyr::filter(`PCR+` == 'PCR+') %>%
+  filter(`Sample year` == `Infection Time`) %>%
+  filter(!is.na(titer)) %>%
+  mutate(is_infecting_year = test_strain_year == `Infection Time`) %>%
+  group_by(`Subject number`) %>%
+  mutate(is_homologous_strain = if(any(is_vietnam_strain & is_infecting_year)){ is_vietnam_strain & is_infecting_year } else {is_infecting_year},
+         homologous_titer = mean(logtiter[is_homologous_strain]),
+         individual_distance = homologous_titer-logtiter) 
+
+homologous_strain_table = filter(PCR_infections, is_homologous_strain) %>%
+  ungroup() %>%
+  select(`Infection Time`, test_strain) %>%
+  distinct() %>%
+  rename(homologous_strain = test_strain)
+
+
+
+  
+PCR_infections = merge(PCR_infections,
+      homologous_strain_table,
+      by = 'Infection Time', all = TRUE) %>% 
+  mutate(test_strain = toupper(test_strain),
+         homologous_strain = toupper(homologous_strain)) %>%
+   merge(dist_table %>% 
+            rename(test_strain = strain2, 
+                   homologous_strain = strain1),
+          by = c('homologous_strain', 'test_strain'), all_x = TRUE, all_y = FALSE)
+```
+
+## Plot individual and ferret distances to each strain in the HAI panel using the PCR_infections dataset
+
+```{r warning=FALSE}
+library(foreach)
+foreach(this_infection_year = unique(PCR_infections$`Infection Time`)) %do% {
+  these_data = PCR_infections %>%
+    filter(`Infection Time` == this_infection_year) %>%
+  ungroup() 
+  
+  these_data %>%
+    mutate(`Subject number` = as.factor(`Subject number`),
+           test_strain = factor(test_strain, levels = get_strains_chronologically(test_strain, test_strain_year)),
+           test_strain_year = as.factor(test_strain_year),
+           x_val = jitter(as.numeric(test_strain)),
+           xval_homologous_label = ifelse(is_homologous_strain, test_strain, NA),
+            subject = sprintf('ID %i; YOB %i', `Subject number`, YOB),
+           subject = as.factor(subject))%>%
+    group_by(`Subject number`) %>%
+    mutate(YOB_xval = get_xval_for_year_of_birth(test_strain, unique(`Subject number`), YOB),
+           YOB_label = as.character(unique(YOB)),
+           lag_lab = sprintf('+%sd', days_PCR_swab_to_serum_draw))%>%
+    ungroup() %>% group_by(YOB_xval) %>%
+    mutate(YOB_index = as.numeric(factor(YOB)),
+           YOB_nudge = 0 + (YOB_index-1)/3) %>% 
+   ungroup() %>%
+  ggplot() +
+  geom_hline(aes(yintercept = 0), lty = 3) +
+  geom_point(aes(x = test_strain, y = ferret_distance), pch = 1, color = 'white')+ # To set x axis ticks
+  geom_segment(aes(x = as.numeric(test_strain)-.2, xend = as.numeric(test_strain)+.2, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
+  geom_point(aes(x = x_val, y = individual_distance, color = subject)) + # individual distances as points
+  geom_point(aes(x = xval_homologous_label, y = -7.5), color = 'red', pch = 8)+ # Red asterisk for homologous strains
+  geom_vline(aes(xintercept = YOB_xval+YOB_nudge/10, color = subject), lty = 2) + # subject-specific YOB line
+  geom_text(aes(x = (YOB_xval+ .25)+(YOB_nudge), y = -10, color = subject, label = YOB_label), angle = 90, show.legend = F, size = 3)+
+  geom_text(aes(x = (YOB_xval+.75), y = 27-(YOB_nudge*6), color = subject, label = lag_lab), show.legend = F, size = 3) +
+  theme(axis.text.x = element_text(angle = 70, hjust = 1))+
+  ggtitle(sprintf('Infection year: %s', this_infection_year))+
+  scale_color_viridis_d(end = .8, option = 'plasma')
+  filename = sprintf('HaNam_PCR_infections_%i.png', this_infection_year)
+ cat(sprintf('Saving plot as %s', filename))
+ ggsave(filename = filename, width = 12, height = 7, units = 'in', dpi = 200)
+}
+
+```
+
+## Extact and analyze seroconversions
+```{r warning=FALSE}
+seroconversions = HaNam_titers %>%
+  dplyr::filter(Seroconversion) %>%
+  filter(`Sample year` == `Infection Time`) %>%
+  filter(!is.na(titer)) %>%
+  select(`Subject number`, `test_strain`, is_vietnam_strain,  test_strain_year, logtiter, `Sample year`, YOB) 
+```
+
+13-20 days ()
+## Plot violins of the individual distances vs. ferret distances for each strain in the panel
+
+```{r include=FALSE}
+plot_non_infections(n_years_back = 0, 
+                    titer_df = seroconversions, 
+                    plotname_flag = 'seroconversions', 
+                    dist_table = dist_table)
+```
+
+```{r include=FALSE}
+plot_non_infections(n_years_back = 1, 
+                    titer_df = seroconversions, 
+                    plotname_flag = 'seroconversions', 
+                    dist_table = dist_table)
+```
+
+```{r include=FALSE}
+plot_non_infections(n_years_back = 5, 
+                    titer_df = seroconversions, 
+                    plotname_flag = 'seroconversions', 
+                    dist_table = dist_table)
+```
+
+
+
+
+## Extact and analyze non-PCR confirmed infections
+```{r warning=FALSE}
+non_infections = HaNam_titers %>%
+  dplyr::filter(is.na(`PCR+`)) %>%
+  dplyr::filter(is.na(Seroconversion)) %>%
+  filter(!is.na(titer)) %>%
+  select(`Subject number`, `test_strain`, is_vietnam_strain,  test_strain_year, logtiter, `Sample year`, YOB) 
+```
+
+```{r include=FALSE}
+plot_non_infections(n_years_back = 0, 
+                    titer_df = non_infections, 
+                    plotname_flag = 'non_infections', 
+                    dist_table = dist_table)
+```
+
+```{r include=FALSE}
+plot_non_infections(n_years_back = 1, 
+                    titer_df = non_infections, 
+                    plotname_flag = 'non_infections', 
+                    dist_table = dist_table)
+```
+
+```{r include=FALSE}
+plot_non_infections(n_years_back = 5, 
+                    titer_df = non_infections, 
+                    plotname_flag = 'non_infections', 
+                    dist_table = dist_table)
+```
+
+
+
+------------------
+
+# Vaccination study data
+
+## 106 individuals vaccinated with A/Nangchang933/95
+
+
+
+--------------------------
+
+# 1995 vaccine study
+
+```{r include=FALSE}
+vaccinations_1995 = process_vaccination_study_data(titer_filename = '../raw_data/Fonville_2014_TableS5.csv', 
+                                                   strain_fiename = '../processed_data/vaccine_study_1995_strains.csv', 
+                                                   homologous_strain_name = 'A/NANCHANG/933/95')
+```
+
+```{r}
+plot_vaccine_study_by_strain(titer_data_frame = vaccinations_1995, study_year = 1995)
+```
+
+```{r}
+## Extract homologous titers, calculate individual distances, and plot
+plot_vaccine_study_by_year(vaccinations_1995, 1995)
+```
+
+
+
+
+
+------------------
+
+# 1997 vaccine study
+
+## 128 individuals vaccinated with A/Sydney/5/97
+
+
+
+```{r include=FALSE}
+vaccinations_1997 = process_vaccination_study_data(titer_filename = '../raw_data/Fonville_2014_TableS6.csv',
+                                                   strain_fiename = '../processed_data/vaccine_study_1997_strains.csv', 
+                                                   homologous_strain_name = 'A/SYDNEY/5/97')
+```
+
+```{r}
+plot_vaccine_study_by_strain(vaccinations_1997, 1997)
+```
+
+```{r}
+plot_vaccine_study_by_year(vaccinations_1997, 1997)
+```
+
+
+
+
+
+
+
+
+
+------------------
+
+# 2009 vaccine study
+
+
+
+```{r}
+vaccinations_2009 = process_vaccination_study_data(titer_filename = '../raw_data/Fonville_2014_TableS13.csv', 
+                                                   strain_fiename = '../processed_data/vaccine_study_2009_strains.csv', 
+                                                   homologous_strain_name = 'A/PERTH/16/2009')
+```
+```{r}
+plot_vaccine_study_by_strain(vaccinations_2009, 2009)
+```
+
+
+
+```{r}
+plot_vaccine_study_by_year(vaccinations_2009, 2009)
+```
+
+
+
+
+
+
+
+
+------------------
+
+## 2010 vaccine study
+
+
+
+```{r}
+vaccinations_2010 = process_vaccination_study_data('../raw_data/Fonville_2014_TableS14.csv',  
+                                                  '../raw_data/vaccine_study_2010_strains.csv', 
+                                                   'A/VIETNAM/53/2010') 
+```
+```{r}
+plot_vaccine_study_by_strain(vaccinations_2010, 2010)
+```
+
+
+```{r}
+plot_vaccine_study_by_year(vaccinations_2010, 2010)
+```
+
