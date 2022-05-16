@@ -11,10 +11,8 @@ HaNam_titers_to_numeric = function(titer_col){
 to_log = function(titer){
   ## Convert to log2 titer
   ## In Fonville et al they define log titer as log2(titer/10)
-  ## But I'm using log2(titer/5) so that undetectable titers ("<10") = 0
-  ## The different denominators shift our logtiter values up by 1 relative to those of Fonville 2014, but don't affect logtiter differences (i.e. individual distances).
   stopifnot(is.numeric(titer))
-  log2(titer/5)
+  log2(titer/10)
 }
 
 
@@ -25,6 +23,12 @@ clean_years = function(years){
   ifelse(years<20, years+2000, 
          ifelse(years<100, years+1900,
                 years))
+}
+
+extract_strain_year = function(strain){
+  extract(tibble(strain), strain, into = 'strain_year', regex = '.+/(\\d?\\d?\\d\\d$)', convert = T) %>%
+    mutate(strain_year = clean_years(strain_year)) %>%
+    pull(strain_year)
 }
 
 
@@ -216,12 +220,15 @@ plot_non_infections = function(n_years_back, ## How many years back from the sam
              last_n_years = factor(last_n_years),
              is_sample_year = sample_year == test_strain_year,
              YOB = as.factor(YOB),
-             ylim_cutoff = ifelse(median_ferret_distance>15, 15, NA)) 
+             ylim_cutoff = ifelse(median_ferret_distance>15, 15, NA),
+             adjusted_distance = adjust_ferret_distances(median_ferret_distance, `past/future`)) 
     rawplot = pdat %>%
       ggplot() +
       geom_violin(aes(x = test_strain, y = median_dist_to_recent_strains), draw_quantiles = .5) +
-      geom_point(aes(x = jitter(xval), y = median_dist_to_recent_strains, color = YOB), alpha = .3) +
+      geom_hline(aes(yintercept = 0), lty = 3)+
+      geom_point(aes(x = jitter(xval), y = median_dist_to_recent_strains, color = YOB), alpha = .6) +
       geom_segment(aes(x = xval-.3, xend = xval+0.3, y = median_ferret_distance, yend = median_ferret_distance), color = 'indianred2')+
+      geom_segment(aes(x = xval-.3, xend = xval+0.3, y = adjusted_distance, yend = adjusted_distance), color = 'gray')+
       ylim(c(-10, 15))+
       theme(axis.text.x = element_text(angle = 70, hjust = 1))+
       # facet_wrap(.~sample_year, labeller = label_both) +
@@ -229,7 +236,8 @@ plot_non_infections = function(n_years_back, ## How many years back from the sam
       ylab(sprintf('median distance to recent strains\n(%i seasons prior to sample)', n_years_back))+
       xlab('test_strain') +
       ggtitle(sprintf('%s from sample year: %i \nRecent strains include %i-%i', plotname_flag, yy, recent_start_year, yy)) +
-      guides(color = guide_legend(nrow = 3, byrow = TRUE))
+      guides(color = guide_legend(nrow = 3, byrow = TRUE))+
+      scale_color_viridis_d()
     if(any(!is.na(pdat$ylim_cutoff))) {
       rawplot +
         geom_segment(aes(x = xval, xend = xval, y = ylim_cutoff-2, yend = ylim_cutoff), color = 'indianred2', arrow = arrow(length = unit(0.05, "inches")))
@@ -240,7 +248,7 @@ plot_non_infections = function(n_years_back, ## How many years back from the sam
     cat(sprintf('saved plot to %s \n', filename))
     ggsave(filename = filename, width = 12, height = 9, units = 'in', dpi = 200)
   }
-}
+} 
 
 
 
@@ -266,7 +274,7 @@ prelim_vaccine_study_import <- function(csv_filename){
                              ))
   names(this_data_frame)[1] = 'subject'
   if(names(this_data_frame)[2] == 'Age'){
-    names(this_data_frame)[2] == 'age'
+    names(this_data_frame)[2] = 'age'
   }else{
     this_data_frame = this_data_frame %>% mutate(age = NA)
   }
@@ -304,10 +312,13 @@ process_vaccination_study_data <- function(titer_filename,
     mutate(is_homologous_strain = test_strain == homologous_strain_name,
            homologous_strain = homologous_strain_name,
            homologous_titer = mean(logtiter[is_homologous_strain]),
-           individual_distance = homologous_titer-logtiter)  %>%
+           homologous_strain_year = extract_strain_year(homologous_strain),
+           individual_distance = homologous_titer-logtiter,
+           dy = test_strain_year-homologous_strain_year,
+           `past/future` = ifelse(dy<0, 'past', 'future'))  %>%
     ## Merge with ferret distances
     merge(dist_table %>% 
-            filter(strain1 == homologous_strain_name) %>% 
+            dplyr::filter(strain1 == homologous_strain_name) %>% 
             rename(test_strain = strain2, 
                    homologous_strain = strain1),
           by = c('homologous_strain', 'test_strain'), all_x = TRUE, all_y = FALSE
@@ -326,7 +337,8 @@ plot_vaccine_study_by_strain <- function(titer_data_frame,
            test_strain_year = as.factor(test_strain_year),
            x_val = jitter(as.numeric(test_strain)),
            xval_homologous_label = ifelse(is_homologous_strain, test_strain, NA),
-           ylim_cutoff = ifelse(ferret_distance>15, 15, NA))
+           ylim_cutoff = ifelse(ferret_distance>15, 15, NA),
+           adjusted_distance = adjust_ferret_distances(ferret_distance))
   
   count_table = plot_data %>%
     group_by(test_strain, timepoint) %>%
@@ -337,9 +349,11 @@ plot_vaccine_study_by_strain <- function(titer_data_frame,
   this_plot =  plot_data %>%
     ggplot() +
     geom_violin(aes(x = test_strain, y = individual_distance)) +
-    geom_point(aes(x = x_val, y = jitter(individual_distance), color = YOB), alpha = .3) +
+    geom_point(aes(x = x_val, y = jitter(individual_distance), color = YOB), alpha = .6) +
+    geom_violin(aes(x = test_strain, y = individual_distance), fill = NA) +
     geom_point(aes(x = xval_homologous_label, y = -7.5), color = 'red', pch = 8)+
     geom_segment(aes(x = as.numeric(test_strain)-0.3, xend = as.numeric(test_strain)+0.3, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
+    geom_segment(aes(x = as.numeric(test_strain)-0.3, xend = as.numeric(test_strain)+0.3, y = adjusted_distance, yend = adjusted_distance), color = 'gray')+
     geom_text(aes(x = test_strain, y = -8.5, label = label), data = count_table, angle = 45, size = 2.5) +
     geom_hline(aes(yintercept = 0), lty = 3) +
     facet_wrap(timepoint~., labeller = 'label_both',ncol = 1) +
@@ -347,12 +361,12 @@ plot_vaccine_study_by_strain <- function(titer_data_frame,
     ylim(c(-9.5, max(plot_data$individual_distance))) +
     ylab('individual distance\n[homoogous titer]-[heterologous titer]')+
     xlab('test strain') +
-    scale_color_viridis_c()
+    scale_color_viridis_c() +
+    ylim(c(-10, 15))
   if(any(!is.na(plot_data$ylim_cutoff))) {
     this_plot = this_plot +
       geom_segment(aes(x = test_strain, xend = test_strain, y = ylim_cutoff-2, yend = ylim_cutoff), color = 'indianred2', arrow = arrow(length = unit(0.05, "inches"))) +
-      geom_hline(aes(yintercept = 15), color = 'indianred2', lty = 3)+
-      ylim(c(-10, 15))
+      geom_hline(aes(yintercept = 15), color = 'indianred2', lty = 3)
   }
   filename = paste0('../plots/vaccine_study_', study_year, '_bystrain.png')
   ggsave(filename = filename, width = 17, height = 9, units = 'in', dpi = 200)
@@ -371,7 +385,8 @@ plot_vaccine_study_by_year <- function(titer_data_frame,
            test_strain_year = factor(test_strain_year),
            x_val = jitter(as.numeric(test_strain_year)),
            xval_homologous_label = ifelse(test_strain_year==study_year, test_strain_year, NA),
-           ylim_cutoff = ifelse(ferret_distance>15, 15, NA))
+           ylim_cutoff = ifelse(ferret_distance>15, 15, NA),
+           adjusted_distance = adjust_ferret_distances(ferret_distance))
   
   count_table = plot_data %>%
     group_by(test_strain_year, timepoint) %>%
@@ -386,6 +401,7 @@ plot_vaccine_study_by_year <- function(titer_data_frame,
     geom_violin(aes(x = as.factor(test_strain_year), y = individual_distance), draw_quantiles = c(0.5)) +
     #geom_boxplot(aes(x = test_strain_year, y = ferret_distance), color = 'indianred3', fill = NA)+
     geom_segment(aes(x = as.numeric(test_strain_year)-.2, xend = as.numeric(test_strain_year)+.2, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
+    geom_segment(aes(x = as.numeric(test_strain_year)-.2, xend = as.numeric(test_strain_year)+.2, y = adjusted_distance, yend = adjusted_distance), color = 'gray')+
     geom_point(aes(x = x_val, y = jitter(individual_distance), color = YOB), alpha = .3) +
     geom_point(aes(x = xval_homologous_label, y = -7.5), color = 'red', pch = 8)+
     #geom_segment(aes(x = as.numeric(test_strain_year)-0.3, xend = as.numeric(test_strain_year)+0.3, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
@@ -434,3 +450,90 @@ get_xval_for_year_of_birth = function(test_strain, # vector of test strain names
     mutate(this_xval = x_val - (dx/2)) %>%  ## Return the first post-birth strain's xvalue, shifted left 
     pull(this_xval)
 }
+
+
+
+
+
+adjust_ferret_distances <- function(ferret_map_distance, 
+                                    past_future,
+                                    lm_fit_file = '../../Fonville_2016/processed_data/primary_ferret_human_distance_lm.rds'){
+  
+  ## Using a previously fitted regression: 'ferret_overestimate = 0 + beta*ferret_map_distance', predict the individual distance as:
+  ##   ferret_map_distance - ferret_overestimate
+  if(!file.exists(lm_fit_file)){
+    stop(sprintf('regression file %s does not exist. This WD is: %s', lm_fit_file, getwd()))
+    # setwd('../../Fonville_2016/R/')
+    # source('regressions.R')
+    # cat('Sourcing ../../Fonville_2016/R/regressions.R\n')
+    # cat('Fitting the regression: ferret_overestimate = 0 + beta*ferret_map_distance \n')
+    # cat('Saving outputs as ../../Fonville_2016/processed_data/primary_ferret_human_distance_lm.rds\n')
+    # lm_fit_file = '../../Fonville_2016/processed_data/primary_ferret_human_distance_lm.rds'
+  }
+  ferret_overestimate = predict.lm(read_rds(lm_fit_file), newdata = tibble(ferret_map_distance = ferret_map_distance,
+                                                                           `past/future` = past_future))
+  ferret_map_distance - ferret_overestimate ## Return adjusted ferret distance
+}
+
+
+
+
+
+
+
+
+
+
+
+
+plot_vaccine_study_by_age <- function(titer_data_frame,
+                                         study_year,
+                                         return_plot = TRUE){
+  plot_data = titer_data_frame %>%
+    filter(timepoint == 'POST') %>%
+    ungroup() %>%
+    mutate(subject = as.factor(subject),
+           `age<=20` = YOB>=1977,
+           age_offset = ifelse(`age<=20`, -.2, .2),
+           test_strain = factor(test_strain, levels = get_strains_chronologically(test_strain, test_strain_year)),
+           test_strain_year = as.factor(test_strain_year),
+           x_val = jitter(as.numeric(test_strain))+age_offset,
+           xval_homologous_label = ifelse(is_homologous_strain, test_strain, NA),
+           ylim_cutoff = ifelse(ferret_distance>15, 15, NA),
+           adjusted_distance = adjust_ferret_distances(ferret_distance))
+  
+  count_table = plot_data %>%
+    group_by(test_strain,  `age<=20`) %>%
+    dplyr::summarise(n_individuals = n()) %>%
+    ungroup() %>%
+    mutate(label = sprintf('n=%i', n_individuals))
+  
+  this_plot =  plot_data %>%
+    ggplot() +
+    geom_violin(aes(x = test_strain, y = individual_distance)) +
+    geom_point(aes(x = x_val, y = jitter(individual_distance), color = YOB), alpha = .6) +
+    geom_violin(aes(x = test_strain, y = individual_distance), fill = NA) +
+    geom_point(aes(x = xval_homologous_label, y = -7.5), color = 'red', pch = 8)+
+    geom_segment(aes(x = as.numeric(test_strain)-0.3, xend = as.numeric(test_strain)+0.3, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
+    geom_segment(aes(x = as.numeric(test_strain)-0.3, xend = as.numeric(test_strain)+0.3, y = adjusted_distance, yend = adjusted_distance), color = 'gray')+
+    geom_text(aes(x = test_strain, y = -8.5, label = label), data = count_table, angle = 45, size = 2.5) +
+    geom_hline(aes(yintercept = 0), lty = 3) +
+    facet_wrap(`age<=20`~., labeller = 'label_both',ncol = 1) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    ylim(c(-9.5, max(plot_data$individual_distance))) +
+    ylab('individual distance\n[homoogous titer]-[heterologous titer]')+
+    xlab('test strain') +
+    scale_color_viridis_c() +
+    ylim(c(-10, 15))
+  if(any(!is.na(plot_data$ylim_cutoff))) {
+    this_plot = this_plot +
+      geom_segment(aes(x = test_strain, xend = test_strain, y = ylim_cutoff-2, yend = ylim_cutoff), color = 'indianred2', arrow = arrow(length = unit(0.05, "inches"))) +
+      geom_hline(aes(yintercept = 15), color = 'indianred2', lty = 3)
+  }
+  filename = paste0('../plots/vaccine_study_', study_year, '_byage.png')
+  ggsave(filename = filename, width = 17, height = 9, units = 'in', dpi = 200)
+  cat(sprintf('saved plot to %s', filename))
+  if(return_plot == TRUE) return(this_plot)
+}
+
+

@@ -115,11 +115,16 @@ PCR_infections = merge(PCR_infections,
       homologous_strain_table,
       by = 'Infection Time', all = TRUE) %>% 
   mutate(test_strain = toupper(test_strain),
-         homologous_strain = toupper(homologous_strain)) %>%
+         homologous_strain_year = extract_strain_year(homologous_strain),
+         homologous_strain = toupper(homologous_strain),
+         dy = test_strain_year-homologous_strain_year,
+         `past/future` = ifelse(dy<0, 'past', 'future')) %>%
    merge(dist_table %>% 
             rename(test_strain = strain2, 
                    homologous_strain = strain1),
           by = c('homologous_strain', 'test_strain'), all_x = TRUE, all_y = FALSE)
+
+write_csv(PCR_infections, '../processed_data/PCR_infections.csv')
 ```
 
 ## Plot individual and ferret distances to each strain in the HAI panel using the PCR_infections dataset
@@ -147,19 +152,21 @@ foreach(this_infection_year = unique(PCR_infections$`Infection Time`)) %do% {
     mutate(YOB_index = as.numeric(factor(YOB)),
            YOB_nudge = 0 + (YOB_index-1)/3) %>% 
    ungroup() %>%
+    mutate(adjusted_distance = adjust_ferret_distances(ferret_map_distance = ferret_distance, past_future = `past/future`)) %>%
   ggplot() +
   geom_hline(aes(yintercept = 0), lty = 3) +
   geom_point(aes(x = test_strain, y = ferret_distance), pch = 1, color = 'white')+ # To set x axis ticks
-  geom_segment(aes(x = as.numeric(test_strain)-.2, xend = as.numeric(test_strain)+.2, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
   geom_point(aes(x = x_val, y = individual_distance, color = subject)) + # individual distances as points
   geom_point(aes(x = xval_homologous_label, y = -7.5), color = 'red', pch = 8)+ # Red asterisk for homologous strains
+      geom_segment(aes(x = as.numeric(test_strain)-.2, xend = as.numeric(test_strain)+.2, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
+  geom_segment(aes(x = as.numeric(test_strain)-.2, xend = as.numeric(test_strain)+.2, y = adjusted_distance, yend = adjusted_distance), color = 'gray')+
   geom_vline(aes(xintercept = YOB_xval+YOB_nudge/10, color = subject), lty = 2) + # subject-specific YOB line
   geom_text(aes(x = (YOB_xval+ .25)+(YOB_nudge), y = -10, color = subject, label = YOB_label), angle = 90, show.legend = F, size = 3)+
   geom_text(aes(x = (YOB_xval+.75), y = 27-(YOB_nudge*6), color = subject, label = lag_lab), show.legend = F, size = 3) +
   theme(axis.text.x = element_text(angle = 70, hjust = 1))+
   ggtitle(sprintf('Infection year: %s', this_infection_year))+
   scale_color_viridis_d(end = .8, option = 'plasma')
-  filename = sprintf('HaNam_PCR_infections_%i.png', this_infection_year)
+  filename = sprintf('../plots/HaNam_PCR_infections_%i.png', this_infection_year)
  cat(sprintf('Saving plot as %s', filename))
  ggsave(filename = filename, width = 12, height = 7, units = 'in', dpi = 200)
 }
@@ -250,10 +257,14 @@ plot_non_infections(n_years_back = 5,
 vaccinations_1995 = process_vaccination_study_data(titer_filename = '../raw_data/Fonville_2014_TableS5.csv', 
                                                    strain_fiename = '../processed_data/vaccine_study_1995_strains.csv', 
                                                    homologous_strain_name = 'A/NANCHANG/933/95')
+write_csv(vaccinations_1995, '../processed_data/vaccinations_1995.csv')
 ```
 
 ```{r}
 plot_vaccine_study_by_strain(titer_data_frame = vaccinations_1995, study_year = 1995)
+```
+```{r}
+plot_vaccine_study_by_age(titer_data_frame = vaccinations_1995, study_year = 1995)
 ```
 
 ```{r}
@@ -277,10 +288,15 @@ plot_vaccine_study_by_year(vaccinations_1995, 1995)
 vaccinations_1997 = process_vaccination_study_data(titer_filename = '../raw_data/Fonville_2014_TableS6.csv',
                                                    strain_fiename = '../processed_data/vaccine_study_1997_strains.csv', 
                                                    homologous_strain_name = 'A/SYDNEY/5/97')
+write_csv(vaccinations_1997, '../processed_data/vaccinations_1997.csv')
 ```
 
 ```{r}
 plot_vaccine_study_by_strain(vaccinations_1997, 1997)
+```
+
+```{r}
+plot_vaccine_study_by_age(vaccinations_1997, 1997)
 ```
 
 ```{r}
@@ -306,8 +322,9 @@ vaccinations_2009 = process_vaccination_study_data(titer_filename = '../raw_data
                                                    strain_fiename = '../processed_data/vaccine_study_2009_strains.csv', 
                                                    homologous_strain_name = 'A/PERTH/16/2009')
 ```
+
 ```{r}
-plot_vaccine_study_by_strain(vaccinations_2009, 2009)
+plot_vaccine_study_by_strain(vaccinations_2009, 2009, return_plot = TRUE)
 ```
 
 
@@ -331,7 +348,7 @@ plot_vaccine_study_by_year(vaccinations_2009, 2009)
 
 ```{r}
 vaccinations_2010 = process_vaccination_study_data('../raw_data/Fonville_2014_TableS14.csv',  
-                                                  '../raw_data/vaccine_study_2010_strains.csv', 
+                                                  '../processed_data/vaccine_study_2010_strains.csv', 
                                                    'A/VIETNAM/53/2010') 
 ```
 ```{r}
