@@ -26,7 +26,7 @@ clean_years = function(years){
 }
 
 extract_strain_year = function(strain){
-  extract(tibble(strain), strain, into = 'strain_year', regex = '.+/(\\d\\d\\d?$)', convert = T) %>%
+  extract(tibble(strain), strain, into = 'strain_year', regex = '.+/(\\d?\\d?\\d\\d$)', convert = T) %>%
     mutate(strain_year = clean_years(strain_year)) %>%
     pull(strain_year)
 }
@@ -102,7 +102,7 @@ get_putative_primary_strains = function(strain, titer, circulated_in_sampling_wi
 
 
 get_subject_factor_by_YOB <- function(subject, YOB, season){
-  tibble(subject = subject,
+  tibble(subject = subject,## Get probabilities for the United States in a many observation years
          YOB = YOB, 
          season = season) %>%
     distinct() %>%
@@ -120,17 +120,40 @@ get_subject_label <- function(subject, YOB, season){
 }
 
 
+
 adjust_ferret_distances <- function(ferret_map_distance, 
-                                    lm_fit_file = '../processed_data/primary_ferret_human_distance_lm.rds'){
+                                    past_future,
+                                    lm_fit_file = '../../Fonville_2016/processed_data/primary_ferret_human_distance_lm.rds'){
   
   ## Using a previously fitted regression: 'ferret_overestimate = 0 + beta*ferret_map_distance', predict the individual distance as:
   ##   ferret_map_distance - ferret_overestimate
   if(!file.exists(lm_fit_file)){
-    source('regressions.R') 
-    cat('Sourcing regressions.R\n')
-    cat('Fitting the regression: ferret_overestimate = 0 + beta*ferret_map_distance \n')
-    cat('Saving outputs as ../processed_data/primary_ferret_human_distance_lm.rds\n')
-    lm_fit_file = '../processed_data/primary_ferret_human_distance_lm.rds'
+    stop(sprintf('regression file %s does not exist. This WD is: %s', lm_fit_file, getwd()))
   }
-  ferret_map_distance - predict.lm(read_rds(lm_fit_file), newdata = tibble(ferret_map_distance = ferret_map_distance))
+  ferret_overestimate = predict.lm(read_rds(lm_fit_file), newdata = tibble(ferret_map_distance = ferret_map_distance,
+                                                                           `past/future` = past_future))
+  ferret_map_distance - ferret_overestimate ## Return adjusted ferret distance
+}
+
+
+get_AUC = function(year, logtiter, id){
+  tibble(year = year, 
+         logtiter = ifelse(logtiter>=0, logtiter, 0),
+         id = id) %>% ## Set the min logtiter to 0
+    group_by(id, year) %>%
+    arrange(year) %>%
+    summarise(mean_logtiter = mean(logtiter)) %>%
+    ungroup() %>% group_by(id) %>%
+    mutate(lag_logtiter = c(dplyr::lag(mean_logtiter)),
+           dt = c(year-dplyr::lag(year)),
+           AUC = sum((lag_logtiter+mean_logtiter)/2*dt, na.rm = T)) %>%
+    select(id, AUC) %>%
+    distinct()
+}
+
+primary_strain_table <- function(individual_distances){
+  individual_distances %>%
+    group_by(subject, putative_primary_strain) %>%
+    summarise() %>%
+    filter(!is.na(putative_primary_strain))
 }
