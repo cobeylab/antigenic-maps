@@ -1,0 +1,138 @@
+---
+title: "Repeated ferret samples"
+output: html_notebook
+---
+
+## Analyze data from Yoshi K's lab
+
+Experimental design:
+
+
+# Goals
+
+## 1. Characterize individual variation in measured distances among ferrets infected by the same strain.
+
+There are 3 ferrets per group (treated with the same dose and series of immunization strains).
+There are two technical replicated (repeated titer measurements) per ferret.
+
+## 2. Do pairwise distances change between 3 weeks and 2-3 months after immunization?
+
+## 3. Does antiserum's breadth increase between 3 weeks and 2-3 months after immunization?
+    
+**Background**: This (study of SARS-CoV-2 mABs)[https://www.cell.com/immunity/fulltext/S1074-7613(21)00294-6?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS1074761321002946%3Fshowall%3Dtrue] shows that breadth increases from 1.2-6 months post infection. 
+
+In this dataset we can compare antisera taken 3 weeks post infection (consistent with the sampling lag used for most antigenic maps), and approximately 1-2 months later, prior to the next immunization.
+
+We will have limited ability to address question #3, because titers are only measured to three closely related strains.
+
+
+## Load the data
+```{r}
+rm(list = ls())
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+
+parse_immune_state = function(sample_label, strain_i1_i2, strain_i3, days_since_last_immunization){
+  stopifnot(is.factor(sample_label))
+  ifelse(sample_label == 'pre immunization 1', 'naive',
+         ifelse(sample_label == 'post immunization 1' | sample_label == 'pre immunization 2', sprintf('1x %s +%id', strain_i1_i2, days_since_last_immunization),
+                ifelse(sample_label == 'post immunization 2' | sample_label == 'pre immunization 3', sprintf('2x %s +%id', strain_i1_i2, days_since_last_immunization),
+                       ifelse(sample_label == 'post immunization 3', sprintf('2x %s\n1x %s +%id', strain_i1_i2, strain_i3, days_since_last_immunization), NA))))
+}
+
+get_days_since_last_immunization <- function(sample_date){
+  immunization_dates = read_csv('../raw-data/study_design.csv', col_types = 'ccccc') %>%
+    dplyr::filter(grepl('immunization', event)) %>%
+    mutate(date = as_date(date, format = '%m/%d/%Y')) %>%
+    pull(date)
+  sapply(sample_date, function(dd){
+    immunization_before_sample = ymd(immunization_dates)<ymd(dd)
+    if(!any(immunization_before_sample)){
+      return(NA)
+    }else{
+      past_immunization_dates = immunization_dates[immunization_before_sample]
+      last_immunization_date = max(past_immunization_dates)
+      return(ymd(dd)-ymd(last_immunization_date))
+    }
+  })
+}
+```
+
+
+```{r}
+ferret_data = read_csv('../raw-data/machine_readable_raw_data.csv', col_types = 'cccicdidddddddd') %>%
+  mutate(date = as_date(date, format = '%m/%d/%Y')) %>% ## cast to date
+  pivot_longer(8:15, names_to = c('test_strain', 'replicate'), names_sep = '_', values_to = 'logtiter') %>% ## convert repeated measures of different strains to long format
+  mutate(titer = 10*(2^logtiter), ## calculate absolute titer from logtiter
+         sample_label = factor(sprintf('%s immunization %i', sample_type, sample_immunization),
+                               levels = c('pre immunization 1',  ## Order chronologically
+                                          'post immunization 1', 
+                                          'pre immunization 2', 
+                                          'post immunization 2', 
+                                          'pre immunization 3', 
+                                          'post immunization 3')),
+         last_immunization_strain = ifelse(sample_label == 'pre immunization 1', 'naive', ## Label the last strain with which the ferret was immunized 
+                                           ifelse(sample_label == 'post immunization 3', strain_i3, 
+                                                  strain_i1_i2)),
+         days_since_last_immunization = get_days_since_last_immunization(date),
+         immune_state_label = parse_immune_state(sample_label, strain_i1_i2, strain_i3, days_since_last_immunization),
+         group = ifelse(strain_i1_i2 == 'Neth399', 'Neth399(WU95 cluster)->Neth312(FU02 cluster)', 'Neth312(FU02 cluster)->Wis15(PE09 cluster)'),
+         ferret_id = factor(ferret_id),
+         test_strain = factor(test_strain, levels = c('Neth399', 'Neth312', 'Perth09', 'Wis15'))) %>%
+  rename(dose = `dose(ug_HA/ferret)`)
+```
+
+```{r}
+ferret_data %>%
+  group_by(sample_label, last_immunization_strain, days_since_last_immunization, immune_state_label) %>%
+  summarise()
+```
+
+
+
+## Variability among technical replicates
+```{r}
+ferret_data %>%
+  group_by(sample_label, ferret_id, test_strain, dose, group) %>%
+  summarise(difference = as.factor(diff(logtiter))) %>%
+  dplyr::filter(!is.na(difference)) %>%
+  ungroup %>%   group_by(sample_label, ferret_id, test_strain, dose, group, difference) %>%
+  summarise(n = n()) %>%
+  ggplot() +
+  #geom_bar(aes(x = test_strain, y = n, color = difference, fill = difference), stat = 'identity') +
+  geom_bar(aes(x = difference), breaks = c(-.5, 3.5, by = 1)) +
+  facet_grid(dose~test_strain, labeller = label_both) +
+  scale_color_viridis_d(aesthetics = c('color', 'fill'))
+ggsave('../plots/technical_replicates.png')
+```
+
+Among techincal replicates, defined as repeated titer measurements performed on the same sample, measured titers rarely differ by more than a factor of 2.
+
+
+## Variability among ferrets
+
+```{r}
+these_data = ferret_data %>%
+  group_by(sample_label, test_strain, dose, group) %>%
+  mutate(ferret_index = as.factor(as.numeric(factor(as.character(ferret_id))))) %>%
+  ungroup() %>%   group_by(sample_label, test_strain, dose, group, ferret_id, ferret_index, last_immunization_strain, immune_state_label) %>%
+  summarise(log_gmt = mean(logtiter), 
+            xval = as.numeric(test_strain)+(as.numeric(ferret_index)-2)*.1,
+            last_immunization_strain = factor(last_immunization_strain, levels = c(levels(test_strain), 'naive')),
+            dose = factor(dose)) %>%
+  ungroup()
+
+ymax = max(these_data$log_gmt, na.rm = T)
+
+these_data %>%
+  ggplot()+
+  geom_blank(aes(x = test_strain, y = log_gmt))+
+  geom_point(aes(x = xval, y = jitter(log_gmt), color = dose), alpha = .5)+
+  geom_line(aes(x = xval, y = log_gmt, color = dose, group = interaction(dose, ferret_index))) +
+  geom_vline(aes(xintercept = last_immunization_strain), lty = 2)+
+  geom_text(aes(x = 0.5, y = ymax, label = immune_state_label), hjust = 0)+
+  ylim(c(0, ymax+1))+
+  facet_grid(sample_label~group)
+ggsave('../plots/raw_ferret_titers.png', width = 8, height = 10, units = 'in', dpi = 200)
+```
