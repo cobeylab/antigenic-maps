@@ -94,7 +94,7 @@ pcr_summary = pcr_infections %>%
 pcr_summary
 ```
 
-```{r echo=FALSE}
+```{r echo=FALSE, fig.dim=c(8.5, 11)}
 pcr_infections %>%
   rename(sample_year = sample_year) %>%
   filter(logtiter >= 0) %>%
@@ -119,9 +119,13 @@ pcr_infections %>%
   facet_grid(subject~sample_year, labeller = label_both) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   scale_fill_manual(values = c('gray', 'orange')) +
-  geom_text(aes(x = 1975, y = 6, label = sprintf('+%sd', days_since_infection)), size = 3)
+  geom_text(aes(x = 1975, y = 6, label = sprintf('+%sd', days_since_infection)), size = 3)+
+  ylab('logtiter')
 ggsave('../plots/pcr_landscapes.png', width = 9, height = 12, units = 'in')
 ```
+
+The above figure is similar to antigenic landscapes from Fonville 2014, with the following changes: The x-axis shows the year of strain circulation, and the y axis shows the log gmt to all strains that circulated in the year of interest. The values are not smoothed. THe top left shows the days elapsed from infection to sample collection. The blue upward and pink downward arrows show changes in titer from the previous annual sample.
+
 
 ## Plot summary stats by time since infection
 ```{r echo = FALSE}
@@ -286,7 +290,7 @@ n_indiv = pcr_infections %>%
 
 
 
-```{r echo = F}
+```{r echo = F, fig.dim = c(7, 10)}
 time_labs = c('pre-infection', '<2m', '2-6m', '7-12m', '13-24m', '25-36m', '36m+')
 names(time_labs) = levels(pcr_infections$c_years_since_infection)
 
@@ -307,7 +311,7 @@ pcr_infections %>%
   ylab('logtiter')+
   xlab('years between circulation of homologous strain and test strain') +
   theme(legend.position = 'none')
-ggsave('../plots/HaNam_fitted_models.png')
+ggsave('../plots/HaNam_fitted_models.png', width = 7, height = 10)
 ```
 
 
