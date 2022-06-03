@@ -1,0 +1,286 @@
+---
+title: "How does the timing of ferret antisera collection affect antigenic distance and cross-reacitvity estimates?"
+output: 
+  bookdown::pdf_document2:
+    toc: false
+    number_sections: false
+---
+
+# Background
+
+Antigenic distances estimate cross-reactivity between influenza strains.
+They are usually estimated from a panel of HI titers measured using post-infection antisera from lab ferrets.
+Essentially, antigenic distances quantify how well a primary ferret antibody response raised against one strain cross-reacts with a panel of other strains (Figure \@ref(fig:cartoon)).
+
+```{r cartoon, fig.cap="Visualization of antigenic distance. Points represent strains in the antigenic map, and + represent antibodies. The ferret generates a primary antibody response specific to strain i. Antigenic distances are equal to the difference in the antiserum's log titer to the homologous and heterologous strain.", echo=FALSE, out.width="50%", fig.align='center'}
+knitr::include_graphics('../plots/ferret_distance_cartoon.png')
+```
+
+
+
+
+**Definition of antigenic distance**
+
+In serological panel data, antigenic distances are equal to the difference between a serum's homologous and heterologous log titers ([Neher et al. 2016](https://www.pnas.org/doi/10.1073/pnas.1525578113); [Bedford et al. 2014](https://elifesciences.org/articles/01914); [Smith et al. 2004](https://www.science.org/doi/abs/10.1126/science.1097211))
+Let $s_{ii}$ represent the log titer of antiserum $i$ to the homologous strain, and let $s_{ij}$ represent the log titer of antiserum $i$ to a heterologous strain, $j$.
+The observed distance between strains $i$ and $j$ is defined as:
+
+
+$$ d_{ij} = s_{ii}-s_{ij}$$
+Observed distances $d_{ij}$ are the data inputs used to infer strain locations in antigenic cartography.
+Strain positions within the map are directly informed by observed $d_{ij}$ values, but ultimately the strain locations and distances inferred within the map are overall estimates that account for many, sometimes conflicting $d_{ij}$ observations from each antiserum-strain pair.
+In this proposal, we focus on raw observed distances, not on map distances.
+
+**Visualizing antigenic distance**
+
+Antigenic landscapes ([Fonville 2014](https://www.science.org/doi/10.1126/science.1256427)) can be used to visualize the cross-reactivity profile of a single antiserum against a panel of strains.
+Figure \@ref(fig:samplelandscape) shows a hypothetical antigenic landscape in which the x-axis shows the identity of each strain in the serological panel (ordered chronologically), and the y-axis shows the observed log titer to each strain.
+**Individual distances can be visualized in antigenic landscapes, as the vertical distance between the titer to a homologous and heterologous strain,** following the definition above (Figure \@ref(fig:samplelandscape)). 
+
+
+
+```{r samplelandscape, echo=FALSE, fig.cap="Antibody landscape with annotation of the distance between strains i and m.", out.width="100%"}
+knitr::include_graphics('../plots/sample_distance_landscape.png')
+```
+
+
+**Antigenic distances depend on landscape width and height**
+
+Cross-reactivity depends on both the width (i.e. breadth), and on the height (i.e. magnitude) of a host's antibody landscape.
+We define landscape **width** as the number of strains in the panel to which a titer is measurable, and **height** as the maximum log titer observed to any strain. 
+Together, a landscape's width and height defines its steepness, equal to $\frac{\text{height}}{2*\text{width}}$ (Figure \@ref(fig:landscape)A).
+
+
+Observed distances increase with the steepness of a host's antigenic landscape (Figure \@ref(fig:landscape)).
+By definition, the difference between the maximum titer and other titer measurements will be greater in a steep landscape than in a flat landscape (Figure \@ref(fig:landscape)B).
+
+
+```{r message=FALSE, warning=FALSE, out.height="50%", include=FALSE}
+example_df = bind_rows(
+tibble(ferret = 'high peak',
+       test_strain = letters[1:15],
+       logtiter = c(0, 1, 2.5, 3, 3, 4, 5, 6, 9, 6, 6, 4, 3, 1, 1),
+       homologous_strain = 'i'),
+tibble(ferret = 'medium peak',
+       test_strain = letters[1:15],
+       logtiter = c(0, 1, 2.5, 3, 3, 4, 5, 6, 7, 6, 6, 4, 3, 1, 1),
+       homologous_strain = 'i'),
+tibble(ferret = 'low peak',
+       test_strain = letters[1:15],
+       logtiter = c(3, 4, 3.5, 4, 4.5, 5.5, 5.25, 5.5, 7, 5, 5, 5.5, 5, 4, 3.5),
+       homologous_strain = 'i')) %>%
+  mutate(test_strain = as.factor(test_strain),
+         logtiter = pmax(-1, logtiter-2),
+         detectable_titers = ifelse(logtiter == -1, NA, logtiter),
+         undetectable_titers = ifelse(logtiter == -1, -1, NA)) %>%
+  group_by(ferret) %>%
+  mutate(homologous_titer = logtiter[test_strain=='i'],
+         distance = ifelse(logtiter>=0, homologous_titer-logtiter, NA)) %>%
+  ungroup()
+
+colors = c('salmon', 'cornflowerblue', 'mediumseagreen')
+
+raw_landscape = example_df %>%
+  filter(ferret == 'medium peak') %>%
+  ggplot() +
+  geom_blank(aes(x = test_strain, y = logtiter), data = example_df)+
+  geom_point(aes(x = test_strain, y = logtiter), color = 'mediumseagreen')+
+  geom_point(aes(x = test_strain, y = undetectable_titers), color = 'gray') +
+  geom_vline(aes(xintercept = 9), lty = 2)+
+  geom_ribbon(aes(x = as.numeric(test_strain), ymin = 0, ymax = detectable_titers), fill = 'mediumseagreen', alpha = .5)+
+  geom_hline(aes(yintercept = homologous_titer), lty = 3, color = 'mediumseagreen') +
+  geom_hline(aes(yintercept = 0), lty = 2)+
+  xlab('test strain') +
+  scale_color_manual(values = colors)
+ggsave(filename = '../plots/sample_landscape.png', plot = raw_landscape, width = 4, height = 3.5, units = 'in')
+
+width_height = example_df %>%
+  filter(ferret == 'medium peak') %>%
+  ggplot() +
+  geom_blank(aes(x = test_strain, y = logtiter), data = example_df)+
+  geom_segment(aes(x = 2, xend = 2, y = 0, yend = 5))+
+  geom_text(aes(x = 1.5, y = 2.5, label = 'height'), angle = 90, size = 3)+
+  geom_segment(aes(x = 3, xend = 13, y = -.5, yend = -.5))+
+  geom_text(aes(x = 7, y = -0.75, label = 'width'), size = 3)+
+  geom_segment(aes(x = 4, xend = 9, y = 0, yend = 5))+
+  geom_segment(aes(x = 14, xend = 9, y = 0, yend = 5))+
+  geom_point(aes(x = test_strain, y = logtiter), color = 'mediumseagreen')+
+  geom_point(aes(x = test_strain, y = undetectable_titers), color = 'gray') +
+  geom_vline(aes(xintercept = 9), lty = 2)+
+  geom_ribbon(aes(x = as.numeric(test_strain), ymin = 0, ymax = detectable_titers), fill = 'mediumseagreen', alpha = .5)+
+  geom_hline(aes(yintercept = homologous_titer), lty = 3, color = 'mediumseagreen') +
+  geom_hline(aes(yintercept = 0), lty = 2)+
+  geom_text(aes(x = 11, y = 2.5, label = 'steepness'), angle = -57, size = 3)+
+  xlab('test strain') +
+  ylab('log titer') +
+  scale_color_manual(values = colors)
+
+taller = example_df %>%
+  filter(ferret != 'low peak') %>%
+  ggplot() +
+  geom_point(aes(x = test_strain, y = jitter(detectable_titers), color = ferret))+
+  geom_point(aes(x = test_strain, y = undetectable_titers), color = 'gray') +
+  geom_vline(aes(xintercept = 9), lty = 2)+
+  geom_ribbon(aes(x = as.numeric(test_strain), ymin = 0, ymax = detectable_titers, fill = ferret), alpha = .3)+
+  geom_hline(aes(yintercept = homologous_titer, color = ferret), lty = 3) +
+  geom_hline(aes(yintercept = 0))+
+  geom_segment(aes(x = 11.8, xend = 11.8, y = 7, yend = 2), color = 'salmon')+
+  geom_segment(aes(x = 12.2, xend = 12.2, y = 5, yend = 2), color = 'mediumseagreen')+
+  geom_text(aes(x = 12.8 , y = 4, label = 'distance'), angle = 90, size = 3)+
+  xlab('test strain') + 
+  ylab('log titer') +
+  scale_color_manual(values = colors[-2], aesthetics = c('color', 'fill'))
+
+wider = example_df %>%
+  filter(ferret != 'high peak') %>%
+  ggplot() +
+    geom_blank(aes(x = test_strain, y = logtiter), data = example_df)+
+  geom_point(aes(x = test_strain, y = jitter(detectable_titers), color = ferret))+
+  geom_point(aes(x = test_strain, y = undetectable_titers), color = 'gray') +
+  geom_vline(aes(xintercept = 9), lty = 2)+
+  geom_ribbon(aes(x = as.numeric(test_strain), ymin = 0, ymax = detectable_titers, fill = ferret), alpha = .3)+
+  geom_hline(aes(yintercept = 5.05), color = 'mediumseagreen', lty = 3) +
+    geom_hline(aes(yintercept = 4.95), color = 'cornflowerblue', lty = 3) +
+  geom_hline(aes(yintercept = 0))+
+  geom_segment(aes(x = 11.8, xend = 11.8, y = 5, yend = 3.5), color = 'cornflowerblue')+
+  geom_segment(aes(x = 12.2, xend = 12.2, y = 5, yend = 2), color = 'mediumseagreen')+
+  geom_text(aes(x = 12.8 , y = 4, label = 'distance'), angle = 90, size = 3)+
+  xlab('test strain') + 
+  ylab('log titer') +
+  scale_color_manual(values = colors[-1], aesthetics = c('color', 'fill'))
+
+cowplot::plot_grid(
+  width_height + theme(legend.position = 'none'),
+  taller + theme(legend.position = 'none'),
+  wider + theme(legend.position = 'none'),
+  nrow = 1, labels = 'AUTO') 
+ggsave('../plots/comparison_landscapes.png', width = 8, height = 3, units = 'in')
+```
+
+
+```{r landscape, echo=FALSE, fig.cap="Illustration of the relationship between landscape height, width, steepness, and antigenic distances. (A) The width (breadth), height (max log titer), and steepeness of an antiserum are all metrics of its cross-reactivity. Antigenic distances are greater in steeper landscapes. (B) Holding breadth constant, distances are greater in taller (steeper) landscapes. (C) Holding height constant, distances are greater in narrower (steeper) landscapes. In panels B and C, the vertical colored lines show the distance between i and l obsreved in each antiserum.", fig.align='center', out.width="100%"}
+knitr::include_graphics('../plots/comparison_landscapes.png')
+```
+
+
+# Problem: Landscape width, height, and steepness may be sensitive to the time elapsed between infection serum sampling.
+
+The breadth and magnitude of an individual's antibody response are expected to change with time since infection.
+In other words, the width, height, and steepenss of an individual's antibody landscape may be sensitive to the timepoint at which sera are sampled.
+The combined effect of changes in breadth and magnitude on landscape steepenss, and on measured antigenic distances, is not fully understood.
+
+## Changes over time in titer magnitude and landscape height
+Antibody titers typically peak 3-6 weeks after influenza infection or vaccination [(Zhao et al. 2005)](https://academic.oup.com/aje/article/187/1/135/3896092), and then begin to wane (Figure \@ref(fig:timeline)).
+The waning rate of titers is biphasic; initially fast, then slow ([Xiong et al. 2022](https://academic.oup.com/jid/advance-article-abstract/doi/10.1093/infdis/jiac117/6563665), [Ranjeva et al. 2019](https://www.nature.com/articles/s41467-019-09652-6), [Kucharski et al. 2018](https://journals.plos.org/plosbiology/article?id=10.1371/journal.pbio.2004974); [Zhao et al. 2005](https://academic.oup.com/aje/article/187/1/135/3896092); [Amanna & Slifka, 2010](https://onlinelibrary.wiley.com/doi/10.1111/j.1600-065X.2010.00912.x)).
+The short-term boost and initial period of relatively fast waning are driven by the rapid proliferation and decay of plasmablasts and short-lived plasma cells.
+Long-term titers are maintained by a separate population of long-lived plasma cells, which can survive for decades in the bone marrow and other privileged sites, where they continue to secrete antibodies ([Amanna & Slifka, 2010](https://onlinelibrary.wiley.com/doi/10.1111/j.1600-065X.2010.00912.x), [Radbruch et al. 2006](https://www.nature.com/articles/nri1886)).
+Many studies show or assume that influenza titers reach a steady state 1-2 years after infection, and that further waning is negligible ([Ranjeva et al. 2019](https://www.nature.com/articles/s41467-019-09652-6), [Kucharski et al. 2018](https://journals.plos.org/plosbiology/article?id=10.1371/journal.pbio.2004974); [Zhao et al. 2005](https://academic.oup.com/aje/article/187/1/135/3896092); [Amanna & Slifka, 2010](https://onlinelibrary.wiley.com/doi/10.1111/j.1600-065X.2010.00912.x)), but timescales of titer waning vary among individuals ([Fonville et al. 2014](https://www.science.org/doi/10.1126/science.1256427)), and at least one study estimated that measurable waning continues for up to five years after infection ([Xiong et al. 2022](https://academic.oup.com/jid/advance-article-abstract/doi/10.1093/infdis/jiac117/6563665)).
+
+## Changes over time in breadth and landscape width
+In the first several months after infection, the breadth of a serum antibody response may increase due to affinity maturation [Muecksch et al. 2021](https://doi.org/10.1016/j.immuni.2021.07.008), and due to replacement of short-lived plasma cell populations with long-lived plasma cells.
+Over longer timescales, the cross-reactive breadth of individual sera appears to be stable ([Fonville et al. 2014](https://www.science.org/doi/10.1126/science.1256427)).
+
+## Effect on landscape steepness and measured distances
+Together, changes in the width and height of an antibody landscape in the weeks and months after infection could systematically affect the antigenic distances estimates obtrained from ferret sera sampled at different timepoints post-infection.
+Changes in the width and height of a host's antibody landscape are expected to be greatest in the first few months after infection, while short-term titer dynamics and affinity maturation are still in progress (Figure \@ref(fig:timeline)).
+
+```{r timeline, echo=FALSE, fig.cap="Illustration of long and short-term changes in antibody titers after infections.", out.width="100%", fig.align='center'}
+knitr::include_graphics('../plots/timing_sketch.png')
+```
+
+The goal of estimating cross-reactivity is usually to estimate whether a recent infection or vaccination with one strain will protect against another strain.
+Ideally, ferret-based distance estimates would accurately estimate cross-reactivity to new antigenic variants in the human population at the beginning of flu season.
+But due to practical constraints, ferret antisera are usually sampled very soon after infection (2-3 weeks pi) ([Fonville et al. 2014](https://www.science.org/doi/10.1126/science.1256427)).
+In contrast, a cross-sectional sample of the human population taken at the start of an influenza epidemic would include a majority of individuals who had last been exposed to influenza a year or more in the past ([Fonville et al. 2014](https://www.science.org/doi/10.1126/science.1256427), [Kucharski et al. 2015](https://journals.plos.org/plosbiology/article?id=10.1371/journal.pbio.1002082), [Kucharski et al. 2018](https://journals.plos.org/plosbiology/article?id=10.1371/journal.pbio.2004974), [Zhao et al. 2005](https://academic.oup.com/aje/article/187/1/135/3896092)), and a smaller fraction of individuals who had been vaccinated or infected in the past weeks or months, with season-specific lags dependent on the relative timing of epidemic start dates and sample collection date ([Tsang et al. 2016](https://journals.lww.com/epidem/Fulltext/2016/01000/Interpreting_Seroepidemiologic_Studies_of.21.aspx), [Ferdinands et al. 2017](http://dx.doi.org/10.1093/cid/ciw816)).
+
+
+
+## Questions
+
+1. **In ferrets, and in primarily infected children** How does the width and height of antigenic landscapes change with time since infection (0, 1, 3, 6, 12m)?
+2. What is the combined effect of changes in landscape width and height on observed antigenic distances measured at different timepoints?
+3. At what time post infection do distances from ferret sera most accurately estimate steady-state human distances from cross-sectional serological surveys?
+4. At what time post infection do distances from ferret sera most accurately estimate convalescent human distances from post-infection or post-vaccination serum samples?
+
+
+
+## Data needed
+
+**FERRET DATA**
+
+* Timepoints: 0, 21, 90, 182?, 365+? days post infection
+* Panel strains: representatives from 5-7 H3N2 antigenic clusters, chosen to match circulating or vaccine strains in the human data
+* n = 3(?) ferret antisera / homologous strain
+* HAI (and NT?) titer measurements for each antiserum against each panel strain, at each timepoint
+
+**Ferrets needed**
+
+7 strains: 21 ferrets
+
+6 strains: 18 ferrets
+
+5 strains: 15 ferrets
+
+
+
+**CHILD DATA** (if possible)
+
+* Timepoints: 0, 21, 90, 182, 365+ days post infection
+* Panel strains: 5-7 strains
+    * One circulating (homologous) strain from each year in the study
+    * Other (heterologous) strains from past antigenic clusters
+* HAI (and NT?) titer measurements for each antiserum against each panel strain, at each timepoint
+
+Possible child data sources
+
+* HIVE
+* Penn cohort
+
+**ADULT DATA** (if possible)
+
+* Cross-sectional sample
+* Convalescent sample post-vaccination
+* Panel strains: 
+
+  * These data are publicly available (HaNam & Fluscape),for older strain panels
+  * A new dataset tested against the same panel as ferret and child sera would be ideal, but is probably not justified unless easy to pull from HIVE or another cohort study.
+
+
+
+## Discussion questions for Scott
+
+* What ferret data are already available?
+* What is a reasonable number of ferrets to test?
+* Can this be combined with other experimental plans?
+
+## Discussion questions for group
+
+* What human data are available?
+* Should we narrow the aims/questions?
+* Do we want to compare ferret sera to both child and adult sera?
+
+# References
+
+Amanna, Ian J., and Mark K. Slifka. 2010. “Mechanisms That Determine Plasma Cell Lifespan and the Duration of Humoral Immunity.” Immunological Reviews 236 (July): 125–38.
+
+Ferdinands, Jill M., Alicia M. Fry, Sue Reynolds, Joshua G. Petrie, Brendan Flannery, Michael L. Jackson, and Edward A. Belongia. 2017. “Intraseason Waning of Influenza Vaccine Protection: Evidence From the US Influenza Vaccine Effectiveness Network, 2011–2012 Through 2014–2015.” Clinical Infectious Diseases: An Official Publication of the Infectious Diseases Society of America 64 (5): 544–50.
+
+Fonville, J. M., S. H. Wilks, S. L. James, A. Fox, M. Ventresca, M. Aban, L. Xue, et al. 2014. “Antibody Landscapes after Influenza Virus Infection or Vaccination.” Science 346 (6212): 996–1000.
+
+Kucharski, Adam J., Justin Lessler, Derek A. T. Cummings, and Steven Riley. 2018. “Timescales of Influenza A/H3N2 Antibody Dynamics.” PLoS Biology 16 (8): e2004974.
+
+Kucharski, Adam J., Justin Lessler, Jonathan M. Read, Huachen Zhu, Chao Qiang Jiang, Yi Guan, Derek A. T. Cummings, and Steven Riley. 2015. “Estimating the Life Course of Influenza A(H3N2) Antibody Responses from Cross-Sectional Data.” PLoS Biology 13 (3): e1002082.
+
+Muecksch, Frauke, Yiska Weisblum, Christopher O. Barnes, Fabian Schmidt, Dennis Schaefer-Babajew, Zijun Wang, Julio C. C Lorenzi, et al. 2021. “Affinity Maturation of SARS-CoV-2 Neutralizing Antibodies Confers Potency, Breadth, and Resilience to Viral Escape Mutations.” Immunity 54 (8): 1853–68.e7.
+
+Radbruch, Andreas, Gwendolin Muehlinghaus, Elke O. Luger, Ayako Inamine, Kenneth G. C. Smith, Thomas Dörner, and Falk Hiepe. 2006. “Competence and Competition: The Challenge of Becoming a Long-Lived Plasma Cell.” Nature Reviews. Immunology 6 (10): 741–50.
+
+Ranjeva, Sylvia, Rahul Subramanian, Vicky J. Fang, Gabriel M. Leung, Dennis K. M. Ip, Ranawaka A. P. M. Perera, J. S. Malik Peiris, Benjamin J. Cowling, and Sarah Cobey. 2019. “Age-Specific Differences in the Dynamics of Protective Immunity to Influenza.” Nature Communications 10 (1): 1660.
+
+Tsang, Tim K., Vicky J. Fang, Ranawaka A. P. M. Perera, Dennis K. M. Ip, Gabriel M. Leung, J. S. Malik Peiris, Simon Cauchemez, and Benjamin J. Cowling. 2016. “Interpreting Seroepidemiologic Studies of Influenza in a Context of Nonbracketing Sera.” Epidemiology  27 (1): 152–58.
+
+Xiong, Weijia, Tim K. Tsang, Ranawaka A. P. M. Perera, Nancy H. L. Leung, Vicky J. Fang, Ian G. Barr, J. S. Malik Peiris, and Benjamin J. Cowling. 2022. “Biphasic Waning of Hemagglutination Inhibition Antibody Titers after Influenza Vaccination in Children.” The Journal of Infectious Diseases, April. https://doi.org/10.1093/infdis/jiac117.
+
+Zhao, Xiahong, Yilin Ning, Mark I-Cheng Chen, and Alex R. Cook. 2018. “Individual and Population Trajectories of Influenza Antibody Titers Over Multiple Seasons in a Tropical Country.” American Journal of Epidemiology 187 (1): 135–43.
+    
+

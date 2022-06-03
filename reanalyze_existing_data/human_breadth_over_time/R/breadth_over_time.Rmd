@@ -9,17 +9,15 @@ Define metrics to test how the breadth of the human antibody response shifts ove
 
 Metrics:
 
-1.  **homologous titer** - logtiter to the putative homologous strain.
+1.**homologous titer** - logtiter to the putative homologous strain.
 2. **w_x** - temporal width of titers above threshold level x, defined as $w_x=\sum_y(z_{xy})$, where $y$ is the year of strain circulation, and $z_{xy}$ is the fraction of titer measurements to strains that circulated in year $y$ that are greater than threshold $x$.
 3. **steepness** - defined as $\frac{\text{homologous titer}}{w_0}$.
 
 
 ## Data
 
-1. HaNam data from Fonville 2014
+1. HaNam data from Fonville 2014. I am analyzing samples from 12 PCR-confirmed infections in which the time since infection is known. Samples were collected annually for each individual from 2007-2012. The time between infection and the proceeding serum sample ranges from 21-303 days.
 
-  1.a 12 PCR-confirmed infection in which the time since infection is known. Time between infection and sample ranges from 21-303 days.
-  1.b 35 seroconversions in which the year of seroconversion is known, but the date of infection is not.
   
 ```{r include=FALSE}
 library(tidyverse)
@@ -29,8 +27,7 @@ source('../../Ha_Nam/R/analysis_functions.R')
 ```
 
 
-## Read in data on PCR-confirmed infections
-```{r include=FALSE}
+```{r message=FALSE, warning=FALSE, include=FALSE}
 setwd('../../Ha_Nam/R/')
 
 ## All HaNam titers
@@ -95,7 +92,7 @@ pcr_summary
 ```
 
 ```{r echo=FALSE, fig.dim=c(8.5, 11)}
-pcr_infections %>%
+full_plot = pcr_infections %>%
   rename(sample_year = sample_year) %>%
   filter(logtiter >= 0) %>%
   group_by(subject, test_strain_year, sample_year) %>%
@@ -119,12 +116,79 @@ pcr_infections %>%
   facet_grid(subject~sample_year, labeller = label_both) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   scale_fill_manual(values = c('gray', 'orange')) +
-  geom_text(aes(x = 1975, y = 6, label = sprintf('+%sd', days_since_infection)), size = 3)+
+  geom_text(aes(x = 1975, y = 6, label = sprintf('%sd', days_since_infection)), size = 3)+
   ylab('logtiter')
-ggsave('../plots/pcr_landscapes.png', width = 9, height = 12, units = 'in')
+ggsave(plot = full_plot, filename = '../plots/pcr_landscapes.png', width = 9, height = 12, units = 'in')
 ```
 
-The above figure is similar to antigenic landscapes from Fonville 2014, with the following changes: The x-axis shows the year of strain circulation, and the y axis shows the log gmt to all strains that circulated in the year of interest. The values are not smoothed. THe top left shows the days elapsed from infection to sample collection. The blue upward and pink downward arrows show changes in titer from the previous annual sample.
+```{r, fig.dim=c(8.5, 11), echo=FALSE}
+pcr_infections %>%
+  rename(sample_year = sample_year) %>%
+  filter(logtiter >= 0) %>%
+  filter(subject <= 37) %>%
+  group_by(subject, test_strain_year, sample_year) %>%
+  mutate(mean_titer = mean(logtiter, na.rm = T)) %>% ## get the mean titer for each test strain year
+  group_by(subject, test_strain_year) %>%
+  arrange(sample_year) %>%
+  mutate(lag_titer = dplyr::lag(mean_titer),
+            decrease_ribbon = ifelse(lag_titer < mean_titer, lag_titer, NA), 
+            increase_ribbon = ifelse(lag_titer > mean_titer, lag_titer, NA),
+         is_infection_year = sample_year == infection_time) %>%
+  ggplot() +
+  #geom_ribbon(aes(x = test_strain_year, ymax = increase_ribbon, ymin = 0), fill = 'salmon') +
+  geom_ribbon(aes(x = test_strain_year, ymax = mean_titer, ymin = 0, fill = is_infection_year)) +
+  geom_segment(aes(x = test_strain_year, xend = test_strain_year, y = increase_ribbon, yend = mean_titer), 
+               color = 'salmon', arrow = arrow(length = unit(.05, 'inches'))) +
+  geom_segment(aes(x = test_strain_year, xend = test_strain_year, yend = mean_titer, y = decrease_ribbon), 
+               color = 'blue3', arrow = arrow(length = unit(.05, 'inches'))) +
+ # geom_line(aes(x = test_strain_year, y = decrease_ribbon), color = 'blue3', lty = 3) +
+ # geom_point(aes(x = test_strain_year, y = mean_titer,))+
+ # geom_point(aes(x = 1970, y = 6, color = is_infection_year))+
+  facet_grid(subject~sample_year, labeller = label_both) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c('gray', 'orange')) +
+  geom_text(aes(x = 1975, y = 6, label = sprintf('%sd', days_since_infection)), size = 3)+
+  ylab('logtiter') +
+  theme(legend.position = 'below')
+```
+
+```{r, fig.dim=c(7, 6), echo=FALSE}
+pcr_infections %>%
+  rename(sample_year = sample_year) %>%
+  filter(logtiter >= 0) %>%
+  filter(subject > 37) %>%
+  group_by(subject, test_strain_year, sample_year) %>%
+  mutate(mean_titer = mean(logtiter, na.rm = T)) %>% ## get the mean titer for each test strain year
+  group_by(subject, test_strain_year) %>%
+  arrange(sample_year) %>%
+  mutate(lag_titer = dplyr::lag(mean_titer),
+            decrease_ribbon = ifelse(lag_titer < mean_titer, lag_titer, NA), 
+            increase_ribbon = ifelse(lag_titer > mean_titer, lag_titer, NA),
+         is_infection_year = sample_year == infection_time) %>%
+  ggplot() +
+  #geom_ribbon(aes(x = test_strain_year, ymax = increase_ribbon, ymin = 0), fill = 'salmon') +
+  geom_ribbon(aes(x = test_strain_year, ymax = mean_titer, ymin = 0, fill = is_infection_year)) +
+  geom_segment(aes(x = test_strain_year, xend = test_strain_year, y = increase_ribbon, yend = mean_titer), 
+               color = 'salmon', arrow = arrow(length = unit(.05, 'inches'))) +
+  geom_segment(aes(x = test_strain_year, xend = test_strain_year, yend = mean_titer, y = decrease_ribbon), 
+               color = 'blue3', arrow = arrow(length = unit(.05, 'inches'))) +
+ # geom_line(aes(x = test_strain_year, y = decrease_ribbon), color = 'blue3', lty = 3) +
+ # geom_point(aes(x = test_strain_year, y = mean_titer,))+
+ # geom_point(aes(x = 1970, y = 6, color = is_infection_year))+
+  facet_grid(subject~sample_year, labeller = label_both) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c('gray', 'orange')) +
+  geom_text(aes(x = 1975, y = 6, label = sprintf('%sd', days_since_infection)), size = 3)+
+  ylab('logtiter') +
+  theme(legend.position = 'below')
+```
+
+
+The above figure is similar to antigenic landscapes from Fonville 2014, except that the x-axis represents the year of strain circulation, rather than the antigenic coordinates of each strain The x-axis shows the year of strain circulation, and the y axis shows the log gmt to all strains that circulated in that year.The top left shows the days elapsed from infection to sample collection. The blue upward and pink downward arrows show changes in titer from the previous sample tested against the same strain. Yellow landscape mark samples taken following a PCR-confirmed H3N2 infection.
+
+INTERPRETATION: 
+We usually see a large boost in the sample following infection, followed by a slower decrease over the following few years.
+Visually, it's hard to tell if the steepness or breadth of these landscapes varies predictably with increasing time since infection.
 
 
 ## Plot summary stats by time since infection
@@ -140,45 +204,74 @@ The above figure is similar to antigenic landscapes from Fonville 2014, with the
 
 pcr_summary %>%
   mutate(cyrs = cut(years_since_infection, breaks = c(-6:0, .5, 1:6), ordered_result = T)) %>%
+  group_by(cyrs) %>%
+  mutate(n_samples = n(),
+            n_i = length(unique(subject)))%>%
   ggplot(aes(x = cyrs, y = max_titer)) +
   geom_boxplot() +
+  geom_text(aes(x = cyrs, y = 8, label = sprintf('n=%s\n%s subj', n_samples, n_i)))+
   geom_vline(aes(xintercept = 4.5), lty = 2)+
   ylab('max log titer of each individual (jittered)')+
-  xlab('years since PCR confirmed infection')
+  xlab('years since PCR confirmed infection')+
+  ggtitle('Max titer per individual')
 ```
+MAX TITER: The peak titer per individual is transiently elevated in samples collected within 6m of infection. It settles to a level slightly higher than the pre-infection levels in samples taken >6m after infection.
 
 ```{r echo = FALSE}
 pcr_summary %>%
   mutate(cyrs = cut(years_since_infection, breaks = c(-6:0, .5, 1:6), ordered_result = T)) %>%
-  ggplot(aes(x = cyrs, y = (w_40))) +
+  group_by(cyrs) %>%
+  mutate(n_samples = n(),
+            n_i = length(unique(subject)))%>%
+  ggplot(aes(x = cyrs, y = w_40)) +
   geom_boxplot() +
+  geom_text(aes(x = cyrs, y = 17, label = sprintf('n=%s\n%s subj', n_samples, n_i)))+
   geom_vline(aes(xintercept = 4.5), lty = 2)+
-  ylab('w_40')+
-  xlab('years since PCR confirmed infection')
+  xlab('years since PCR confirmed infection')+
+  ggtitle('w_40: breadth of titers>=40')
 ```
+
+$W_40$ can be interpreted as the breadth of an individual's titers above 40, which is typically considered the 50% protective threshold. We see that $W_40$ is highest in samples taken <6m from infection, and it decreases steadily with time since infection.
 
 ```{r echo = FALSE}
 pcr_summary %>%
   mutate(cyrs = cut(years_since_infection, breaks = c(-6:0, .5, 1:6), ordered_result = T)) %>%
-  ggplot(aes(x = cyrs, y = (w_0))) +
+  group_by(cyrs) %>%
+  mutate(n_samples = n(),
+            n_i = length(unique(subject)))%>%
+  ggplot(aes(x = cyrs, y = w_0)) +
   geom_boxplot() +
+  geom_text(aes(x = cyrs, y = 21, label = sprintf('n=%s\n%s subj', n_samples, n_i)))+
   geom_vline(aes(xintercept = 4.5), lty = 2)+
-  ylab('w_0')+
-  xlab('years since PCR confirmed infection')
+  xlab('years since PCR confirmed infection')+
+  ggtitle('w_0: breadth of detectable titers')
 ```
+$W_0$: Like $W_40$, $W_0$ seems to decrease somewhat steadily with time since infection up to 5y.
 
 ```{r echo = FALSE}
 pcr_summary %>%
   mutate(cyrs = cut(years_since_infection, breaks = c(-6:0, .5, 1:6), ordered_result = T)) %>%
+  group_by(cyrs) %>%
+  mutate(n_samples = n(),
+            n_i = length(unique(subject)))%>%
   ggplot(aes(x = cyrs, y = steepness)) +
   geom_boxplot() +
+  geom_text(aes(x = cyrs, y = .35, label = sprintf('n=%s\n%s subj', n_samples, n_i)))+
   geom_vline(aes(xintercept = 4.5), lty = 2)+
-  xlab('years since PCR confirmed infection')
+  xlab('years since PCR confirmed infection')+
+  ggtitle('Steepeness')
 ```
 
+STEEPNESS: Does not appear to change substantially with time since infection. The pairwise distances between strains depend on steepness, so the lack of clear pattern here is surprising, and doesn't indicate a clear relationship between time since infection and distance.
 
 
-## Fit models
+
+# Fit models
+
+
+
+
+
 ```{r echo = FALSE}
 fit_list = list(
   null = lm(individual_distance~dy, data = pcr_infections),
@@ -189,21 +282,21 @@ fit_list = list(
 ```
 
 ## Null model fit
-```{r }
+```{r include=FALSE}
 summary(fit_list$null)
 ```
 The relationship between individual distance and years between strains is not significant.
 
 
 ## past_future model fit
-```{r}
+```{r include=FALSE}
 summary(fit_list$past_future)
 ```
 
 There is a significant relationship between the time between strains (dy), if we fit separate slopes to past strains (the baseline group), or future strains ('future1'). Future0 indicates strains that circulated in the year of infection. Because these are mostly homologous strains, the coefficients can safely be ignored.
 
 ## Null model fit
-```{r}
+```{r include=FALSE}
 summary(fit_list$time_since_infection)
 ```
 
@@ -220,10 +313,7 @@ I have split time since infection into categories:
 The dy:c_years_since_infection(t1,t2] coefficients modulate the slope of individual distance with time between strains.
 Because these coefficients are highest for convalescent titers (dy:c_years_since_infection(0,0.167]=0.10), we can conclude that distances are highest in convalesent sera collected <2m after infection. *Note that these coefficients reflect just a few individuals*.
 
-## Full model fit
-```{r}
-summary(fit_list$full_model)
-```
+
 
 ## AIC
 ```{r echo = FALSE}
@@ -235,6 +325,12 @@ tibble(model = names(fit_list),
 
 The full model provides the best fit in terms of AIC. Let's visualize.
 
+## Full model fit
+```{r}
+summary(fit_list$full_model)
+```
+
+## Plot of full model fit 
 ```{r include=FALSE}
 ## Extract best fit equations
 extract_intercept = function(time_level,
