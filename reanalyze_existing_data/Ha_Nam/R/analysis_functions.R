@@ -338,7 +338,7 @@ plot_vaccine_study_by_strain <- function(titer_data_frame,
            x_val = jitter(as.numeric(test_strain)),
            xval_homologous_label = ifelse(is_homologous_strain, test_strain, NA),
            ylim_cutoff = ifelse(ferret_distance>15, 15, NA),
-           adjusted_distance = adjust_ferret_distances(ferret_distance))
+           adjusted_distance = adjust_ferret_distances(ferret_distance, `past/future`))
   
   count_table = plot_data %>%
     group_by(test_strain, timepoint) %>%
@@ -500,7 +500,7 @@ plot_vaccine_study_by_age <- function(titer_data_frame,
            x_val = jitter(as.numeric(test_strain))+age_offset,
            xval_homologous_label = ifelse(is_homologous_strain, test_strain, NA),
            ylim_cutoff = ifelse(ferret_distance>15, 15, NA),
-           adjusted_distance = adjust_ferret_distances(ferret_distance))
+           adjusted_distance = adjust_ferret_distances(ferret_distance, `past/future`))
   
   count_table = plot_data %>%
     group_by(test_strain,  `age<=20`) %>%

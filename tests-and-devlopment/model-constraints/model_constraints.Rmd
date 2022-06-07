@@ -22,12 +22,24 @@ We only know the distances between the points, so any isometry (reflection, rota
 
 ## Proposed constraints
 
-### In a one-dimensional map:
+To make an m-dimensional map identifiable, we constrain the coordinate vectors of the first m+1 antigens.
+The first fixed coordinates falls at the origin. This eliminates the possibility of shifted solutions.
+The following m fixed vectors anchor the map with respect to all m dimensions, therefore eliminating rotations and reflections.
 
-* $x_1 = (0)$ (the first coordinate is at the origin)
-* $x_2 = (d_{12})$ (the second coordinate is positive)
 
-Provides a unique solution.
+We explain the rationale in detail using induction:
+
+### In a 1D map, we need to constrain the first two antigen coordinates:
+
+$$ \begin{matrix}
+v1 =  &[0 ]\\
+v2 =  &[d_{12}]
+\end{matrix}$$
+
+The first constraint states that ag1 falls at the origin. This anchors the map to eliminate shifted solutions.
+The first constraint states that ag2 falls on axis 1, $d_{12}$ units away from the origin. This eliminates reflections about the origin.
+Rotations are not posible in one dimension.
+
 
 ### In a 2D map:
 

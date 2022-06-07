@@ -14,16 +14,16 @@ rename <- dplyr::rename
 ############# Set this number of dimensions ##############
 this_ndim = 3
 
-outdir = sprintf('plots/%sD_MDS', this_ndim); outdir
+outdir = sprintf('plots/%s--%sD_MDS', Sys.Date(), this_ndim); outdir
 output_dir_check(outdir) # Create the directory if it does not already exist
 
 
 ## Function to parse all outputs
 analyze_one_output_set <- function(fit_list,
                                    test_train_list,
-                                   ab_ag_coords,
                                    immunodominance_flag,
                                    outdir){
+  
   ## Posterior error
   errors = lapply(fit_list, FUN = function(ll) get_titer_error(stan_fit = ll, titer_map = test_train_list$train)) 
   whole_model_errors =  lapply(errors, function(ll) ll$model_errors) %>%
@@ -45,19 +45,7 @@ analyze_one_output_set <- function(fit_list,
   pca_results <- run_pca_on_titer_map(
     convert_titer_map_to_matrix(test_train_list$train)
   )
-  
-  ## Plot the inferred map
-  map_plot <- lapply(fit_list, extract_summary_coords) %>%
-    bind_rows(.id = 'dimensions') %>%
-    select(dimensions, allele, kind, chain, matches('c\\d+$')) %>%
-    ggplot() +
-    geom_point(aes(x = c1, y = c2, color = chain)) +
-    geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data = ab_ag_coords) +
-    facet_wrap(.~dimensions)
-  map_plot
-  ggsave(sprintf('%s/inferred_map_%s_immunodominance.png', outdir, immunodominance_flag), width = 7, height=5, units = 'in', dpi = 200)
-  
-  
+
   return(list(whole_model_errors = whole_model_errors,
               whole_predictive_errors = whole_predictive_errors,
               pairwise_predictive_errors = pairwise_predictive_errors,
@@ -65,6 +53,22 @@ analyze_one_output_set <- function(fit_list,
               pca_results = pca_results))
 }
 
+
+plot_inferred_map <- function(fit_list, 
+                              ab_ag_coords,
+                              outdir, 
+                              immunodominance_flag){ 
+  ## Plot the inferred map
+  map_plot <- lapply(fit_list, extract_summary_coords) %>%
+  bind_rows(.id = 'dimensions') %>%
+  select(dimensions, allele, kind, chain, matches('c\\d+$')) %>%
+  ggplot() +
+  geom_point(aes(x = c1, y = c2, color = chain)) +
+  geom_point(aes(x = c1_Ag, y = c2_Ag), pch = 3, data = ab_ag_coords) +
+  facet_wrap(.~dimensions)
+map_plot
+ggsave(sprintf('%s/inferred_map_%s_immunodominance.png', outdir, immunodominance_flag), width = 7, height=5, units = 'in', dpi = 200)
+}
 
 
 
@@ -98,10 +102,9 @@ skewed_outputs <- analyze_one_output_set(fit_list = skewed_fit_list,
                                          immunodominance_flag = 'skewed',
                                          outdir)
 E1_outputs <- analyze_one_output_set(fit_list = E1_fit_list, 
-                                     test_train_list = E1_test_train, 
-                                     immunodominance_flag = 'E1',
-                                     outdir)
-
+                                         test_train_list = E1_test_train, 
+                                         immunodominance_flag = 'E1',
+                                         outdir)
 
 
 
@@ -119,11 +122,30 @@ bind_rows(list(even = even_outputs$whole_model_errors,
   tidyr::extract(dimensions, into = 'num_dimension', regex = '(\\d+)D', convert = T, remove = F) %>%
   arrange(kind, dimensions) %>%
   mutate(dimensions = factor(num_dimension, labels = unique(dimensions))) %>%
-ggplot()+
+  ggplot()+
   geom_point(aes(x = x_location, y = distance_error_med, color = kind)) +
   geom_segment(aes(x = x_location, xend = x_location, y = distance_error_0.025, yend = distance_error_0.975, color = kind)) +
   xlab('dimensions') + ylab('model distance error')
 ggsave(sprintf('%s/model_error_distance.png', outdir), width = 7, height = 3.5, units = 'in', dpi = 200)
+
+
+## Plot distance error by dimension, per ag-ab pair in training set
+n_pairs = nrow(even_test_train$train)
+bind_rows(list(even = even_outputs$whole_model_errors,
+               skewed = skewed_outputs$whole_model_errors,
+               E1 = E1_outputs$whole_model_errors),
+          .id = 'kind') %>%
+  ungroup() %>%
+  arrange(dimensions) %>%
+  mutate(x_location = as.numeric(as.factor(dimensions)) + (as.numeric(as.factor(kind))-2)/5)%>% 
+  tidyr::extract(dimensions, into = 'num_dimension', regex = '(\\d+)D', convert = T, remove = F) %>%
+  arrange(kind, dimensions) %>%
+  mutate(dimensions = factor(num_dimension, labels = unique(dimensions))) %>%
+  ggplot()+
+  geom_point(aes(x = x_location, y = distance_error_med/n_pairs, color = kind)) +
+  geom_segment(aes(x = x_location, xend = x_location, y = distance_error_0.025/n_pairs, yend = distance_error_0.975/n_pairs, color = kind)) +
+  xlab('dimensions') + ylab('mean error per ag-ab pair\n(distance units)')
+ggsave(sprintf('%s/model_error_distance_mean_pairwise.png', outdir), width = 7, height = 3.5, units = 'in', dpi = 200)
 
 
 ## Plot titer error by dimension
@@ -143,6 +165,23 @@ bind_rows(list(even = even_outputs$whole_model_errors,
   xlab('dimensions') + ylab('model titer error')
 ggsave(sprintf('%s/model_error_titer.png', ourdir), width = 7, height = 3.5, units = 'in', dpi = 200)
 
+## Plot titer error by dimension
+bind_rows(list(even = even_outputs$whole_model_errors,
+               skewed = skewed_outputs$whole_model_errors,
+               E1 = E1_outputs$whole_model_errors),
+          .id = 'kind') %>%
+  ungroup() %>%
+  arrange(dimensions) %>%
+  mutate(x_location = as.numeric(as.factor(dimensions)) + (as.numeric(as.factor(kind))-2)/5)%>% 
+  tidyr::extract(dimensions, into = 'num_dimension', regex = '(\\d+)D', convert = T, remove = F) %>%
+  arrange(kind, dimensions) %>%
+  mutate(dimensions = factor(num_dimension, labels = unique(dimensions))) %>%
+  ggplot()+
+  geom_point(aes(x = x_location, y = titer_error_med/n_pairs, color = kind)) +
+  geom_segment(aes(x = x_location, xend = x_location, y = titer_error_0.025/n_pairs, yend = titer_error_0.975/n_pairs, color = kind)) +
+  xlab('dimensions') + ylab('model titer error')
+ggsave(sprintf('%s/model_error_titer_mean_pairwise.png', ourdir), width = 7, height = 3.5, units = 'in', dpi = 200)
+
 
 
 ## Plot posterior predictive error by dimension
@@ -156,9 +195,24 @@ bind_rows(list(even = even_outputs$whole_predictive_errors,
   ggplot()+
   geom_point(aes(x = x_location, y = titer_error_med, color = kind)) +
   geom_segment(aes(x = x_location, xend = x_location, y = titer_error_0.025, yend = titer_error_0.975, color = kind)) +
+  xlab('dimensions') + ylab('predictive titer error') 
+ggsave(sprintf('%s/model_predictive_error.png', outdir), width = 7, height = 3.5, units = 'in', dpi = 200)
+
+## Plot posterior predictive error by dimension
+n_test_pairs = nrow(even_test_train$test)
+bind_rows(list(even = even_outputs$whole_predictive_errors,
+               skewed = skewed_outputs$whole_predictive_errors,
+               E1 = E1_outputs$whole_predictive_errors),
+          .id = 'kind')  %>%
+  ungroup() %>%
+  arrange(dimensions) %>%
+  mutate(x_location = as.numeric(as.factor(dimensions)) + (as.numeric(as.factor(kind))-2)/5)%>% 
+  ggplot()+
+  geom_point(aes(x = x_location, y = titer_error_med/n_test_pairs, color = kind)) +
+  geom_segment(aes(x = x_location, xend = x_location, y = titer_error_0.025/n_test_pairs, yend = titer_error_0.975/n_test_pairs, color = kind)) +
   xlab('dimensions') + ylab('predictive titer error') +
   geom_hline(aes(yintercept = 1), lty = 3)
-ggsave(sprintf('%s/model_predictive_error.png', outdir), width = 7, height = 3.5, units = 'in', dpi = 200)
+ggsave(sprintf('%s/model_predictive_error_mean_pairwise.png', outdir), width = 7, height = 3.5, units = 'in', dpi = 200)
 
 
 ## Look at inferred coordinates by dimension
@@ -188,6 +242,8 @@ ggsave(sprintf('%s/pca.png', outdir), width = 10, height = 6, units = 'in')
 
 
 
+
+
 ## Calculate error between E1 predictions and all other actual titers
 all_observed_titers = list(E1 = E1_inputs$titer_map,
                            E2 = E2_inputs$titer_map,
@@ -213,7 +269,7 @@ ggplot() +
   ylab('posterior predictive error') +
   xlab('') +
   geom_hline(aes(yintercept = 1), lty = 2) +
-  scale_x_continuous(name = 'test set titers', breaks = 1:5, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
+  scale_x_continuous(name = 'test set titers', breaks = 1:n_test_pairs, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ggsave(sprintf('%s/generalized_E1_error.png', outdir), width = 7, height = 4, units = 'in', dpi = 300)
 
@@ -239,7 +295,7 @@ even_generalized_pairwise %>%
   ylab('posterior predictive error') +
   xlab('') +
   geom_hline(aes(yintercept = 1), lty = 2) +
-  scale_x_continuous(name = 'test set titers', breaks = 1:5, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
+  scale_x_continuous(name = 'test set titers', breaks = 1:n_test_pairs, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ggsave(sprintf('%s/generalized_even_error.png', outdir), width = 7, height = 4, units = 'in', dpi = 300)
 
@@ -265,7 +321,7 @@ skewed_generalized_pairwise %>%
   ylab('posterior predictive error') +
   xlab('') +
   geom_hline(aes(yintercept = 1), lty = 2) +
-  scale_x_continuous(name = 'test set titers', breaks = 1:5, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
+  scale_x_continuous(name = 'test set titers', breaks = 1:n_test_pairs, labels = sprintf('serum %s:\nantigen %s', ag_serum_map$serum, ag_serum_map$antigen))+
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ggsave(sprintf('%s/generalized_skewed_error.png', outdir), width = 7, height = 4, units = 'in', dpi = 300)
 

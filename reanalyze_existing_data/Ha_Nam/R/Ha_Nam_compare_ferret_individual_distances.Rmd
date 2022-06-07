@@ -108,9 +108,6 @@ homologous_strain_table = filter(PCR_infections, is_homologous_strain) %>%
   distinct() %>%
   rename(homologous_strain = test_strain)
 
-
-
-  
 PCR_infections = merge(PCR_infections,
       homologous_strain_table,
       by = 'Infection Time', all = TRUE) %>% 
@@ -134,16 +131,15 @@ library(foreach)
 foreach(this_infection_year = unique(PCR_infections$`Infection Time`)) %do% {
   these_data = PCR_infections %>%
     filter(`Infection Time` == this_infection_year) %>%
-  ungroup() 
-  
-  these_data %>%
-    mutate(`Subject number` = as.factor(`Subject number`),
+  ungroup()  %>%
+    filter(logtiter >= 0) %>%
+    mutate(subject = sprintf('ID:%s; YOB:%s; LAG:%sd', `Subject number`, YOB, days_PCR_swab_to_serum_draw),
+           subject = as.factor(subject),
            test_strain = factor(test_strain, levels = get_strains_chronologically(test_strain, test_strain_year)),
            test_strain_year = as.factor(test_strain_year),
-           x_val = jitter(as.numeric(test_strain)),
+           x_val = as.numeric(test_strain) + (as.numeric(`Subject number`)-2.5)*.2,
            xval_homologous_label = ifelse(is_homologous_strain, test_strain, NA),
-            subject = sprintf('ID %i; YOB %i', `Subject number`, YOB),
-           subject = as.factor(subject))%>%
+           expected_logtiter_ferret_distance = homologous_titer-ferret_distance)%>%
     group_by(`Subject number`) %>%
     mutate(YOB_xval = get_xval_for_year_of_birth(test_strain, unique(`Subject number`), YOB),
            YOB_label = as.character(unique(YOB)),
@@ -152,25 +148,57 @@ foreach(this_infection_year = unique(PCR_infections$`Infection Time`)) %do% {
     mutate(YOB_index = as.numeric(factor(YOB)),
            YOB_nudge = 0 + (YOB_index-1)/3) %>% 
    ungroup() %>%
-    mutate(adjusted_distance = adjust_ferret_distances(ferret_map_distance = ferret_distance, past_future = `past/future`)) %>%
+    mutate(adjusted_distance = adjust_ferret_distances(ferret_map_distance = ferret_distance, past_future = `past/future`),
+           expected_logtiter_adjusted = homologous_titer - adjusted_distance)
+  
+  ribbon_vals = tibble(x_val = unique(these_data$x_val)) 
+  
+  n_x = length(unique(these_data$homologous_strain))
+  n_y = length(unique(these_data$`Subject number`))
+  
+  these_data %>%
+    ggplot() +
+    geom_point(aes(x = test_strain, y = logtiter), color = NA) +
+    geom_ribbon(aes(x = x_val, ymin = -30, ymax = 0), fill = 'gray', alpha = .5, data = ribbon_vals) +
+    geom_vline(aes(xintercept = xval_homologous_label), color = 'springgreen3', lty = 2) +
+    geom_hline(aes(yintercept = 0), lty = 3)+
+    geom_hline(aes(yintercept = homologous_titer), lty = 2)+
+    geom_segment(aes(x = x_val, xend = x_val, y = logtiter, yend = expected_logtiter_ferret_distance), color = 'firebrick2', lty = 2) +
+    geom_segment(aes(x = x_val, xend = x_val, y = homologous_titer, yend = logtiter)) +
+    geom_point(aes(x = x_val, y = logtiter)) +
+    geom_segment(aes(x = x_val-.2, xend = x_val+.2, y = expected_logtiter_ferret_distance, yend =         expected_logtiter_ferret_distance),  color = 'firebrick2') +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    ylab('distance from primary strain')+
+    facet_grid(subject~homologous_strain)
+filename = sprintf('../plots/HaNam_PCR_infections_%s_v2.png', this_infection_year)
+ggsave(filename = filename, width = max(4, 4*n_x), height = max(4, 2+2.5*n_y), units = 'in', dpi = 200)
+
+
+these_data %>% 
+    group_by(`Subject number`) %>%
+    mutate(YOB_xval = get_xval_for_year_of_birth(test_strain, unique(`Subject number`), YOB),
+           YOB_label = as.character(unique(YOB)),
+           lag_lab = sprintf('+%sd', days_PCR_swab_to_serum_draw))%>%
+    ungroup() %>% group_by(YOB_xval) %>%
+    mutate(YOB_index = as.numeric(factor(YOB)),
+           YOB_nudge = 0 + (YOB_index-1)/3) %>% 
+   ungroup() %>%
   ggplot() +
   geom_hline(aes(yintercept = 0), lty = 3) +
   geom_point(aes(x = test_strain, y = ferret_distance), pch = 1, color = 'white')+ # To set x axis ticks
+  geom_segment(aes(x = as.numeric(test_strain)-.2, xend = as.numeric(test_strain)+.2, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
   geom_point(aes(x = x_val, y = individual_distance, color = subject)) + # individual distances as points
   geom_point(aes(x = xval_homologous_label, y = -7.5), color = 'red', pch = 8)+ # Red asterisk for homologous strains
-      geom_segment(aes(x = as.numeric(test_strain)-.2, xend = as.numeric(test_strain)+.2, y = ferret_distance, yend = ferret_distance), color = 'indianred3')+
-  geom_segment(aes(x = as.numeric(test_strain)-.2, xend = as.numeric(test_strain)+.2, y = adjusted_distance, yend = adjusted_distance), color = 'gray')+
   geom_vline(aes(xintercept = YOB_xval+YOB_nudge/10, color = subject), lty = 2) + # subject-specific YOB line
   geom_text(aes(x = (YOB_xval+ .25)+(YOB_nudge), y = -10, color = subject, label = YOB_label), angle = 90, show.legend = F, size = 3)+
   geom_text(aes(x = (YOB_xval+.75), y = 27-(YOB_nudge*6), color = subject, label = lag_lab), show.legend = F, size = 3) +
   theme(axis.text.x = element_text(angle = 70, hjust = 1))+
   ggtitle(sprintf('Infection year: %s', this_infection_year))+
   scale_color_viridis_d(end = .8, option = 'plasma')
-  filename = sprintf('../plots/HaNam_PCR_infections_%i.png', this_infection_year)
+  filename = sprintf('HaNam_PCR_infections_%i.png', this_infection_year)
  cat(sprintf('Saving plot as %s', filename))
  ggsave(filename = filename, width = 12, height = 7, units = 'in', dpi = 200)
 }
-
 ```
 
 ## Extact and analyze seroconversions
@@ -180,6 +208,7 @@ seroconversions = HaNam_titers %>%
   filter(`Sample year` == `Infection Time`) %>%
   filter(!is.na(titer)) %>%
   select(`Subject number`, `test_strain`, is_vietnam_strain,  test_strain_year, logtiter, `Sample year`, YOB) 
+write_csv(x = seroconversions, file = '../processed_data/seroconversions.csv')
 ```
 
 13-20 days ()
