@@ -14,3 +14,4 @@
 *.Rhistory
 *.Rapp*
 reanalyze_existing_data/ferrets_confidential/**
+*.docx
