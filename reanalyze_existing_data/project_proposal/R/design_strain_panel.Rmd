@@ -1,0 +1,54 @@
+---
+title: "Strain panel design"
+output: pdf_document
+---
+
+# Strains needed to compare the breadth, magnitude, and distances in human and ferret sera
+
+## Overall logic
+
+```{r landscape-sketch, echo=FALSE, fig.width=4, fig.align='center', fig.cap="Idealized antigenic landscapes for ferrets and humans. The x-axis represents the temporal distance (years) between the homologous and test strain, and the y-axis represents the observed log titer."}
+knitr::include_graphics('../plots/landscape_sketch.jpeg')
+```
+
+
+### Definitions
+$T_f$ - Ferret threshold. Temporal distance (years) from homologous strain at which ferrets are expected to lose cross-reactivity.
+$T_h$ - Human threshold. Temporal distance at which humans are expected to lose cross-reactivity.
+
+### We would want to include at least the following strains in the panel:
+(0) - Homologous strain
+{A} - Strain(s) temporally close to the homologous strain. (To help characterize the steepness of the landscape).
+{B} - Strains(s) just inside the ferret threshold, $T_f$.
+{C} - Strains(s) between the ferret and human threshold.
+{D} - Strains(s) just outside the human threshold.
+
+* Panel strains in the set {0, A, B} should almost always have measurable titers and can characterize landscape width, steepness, and height in ferrets and humans.
+* Panel strains in {C} are expected to have measurable titers in most humans, but few ferrets. Differences in cross-reactivity to {C} allow us to measure changes in ferret landscape breadth over time, and differences between ferrets and humans at the same timepoing. Ideally, {C} should contain more than one strain.
+* Some humans and no ferrets are expected to show titers to {D}. {D} Helps us measure the boundary of human cross-reactivity, and to measure changes with time, or dose in human cross-reactivity.
+
+
+# 1. Define the temporal breadth of cross-reactivity in ferrets ($T_f$), and humans ($T_h$)
+
+## Ferret data
+
+* [Bedford et al. 2014 supplement](https://elifesciences.org/articles/01914#data) - Compilation of ferret panel data from many publicly available sources.
+* [Fonville et al. 2016 supplement](https://academic.oup.com/jid/article/213/1/31/2459222#supplementary-data) - antisera from 24 ferrets, each infected with a distinct strain, tested against a panel of 23 strains.
+
+## Human data
+
+* [Ha Nam data from Fonville et al. 2014 supplement](https://www-science-org.proxy.uchicago.edu/doi/10.1126/science.1256427). Data from 69 individuals tested against 23 strains. Individuals were sampled annually from 2007-2012. There were 12 PCR-confirmed infections (n=12), 36 seroconverters, and 32 individuals with no evidence of recent infection. We focus here on infections and seroconversions.
+* [Fonville 2014 vaccine study data](https://www-science-org.proxy.uchicago.edu/doi/10.1126/science.1256427). Data from n=106 participants vaccinated against A/Nanchang/933/97 and n=128 vaccinated against A/Sydney/5/97.
+* [Fonville 2016 data](https://academic.oup.com/jid/article/213/1/31/2459222#supplementary-data) from 17 children presumed to have recent primary infections, tested against a panel of 23 strains.
+
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
