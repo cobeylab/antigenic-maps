@@ -13,22 +13,23 @@ knitr::include_graphics('../plots/landscape_sketch.jpeg')
 
 
 ### Definitions
-$T_f$ - Ferret threshold. Temporal distance (years) from homologous strain at which ferrets are expected to lose cross-reactivity.
-$T_h$ - Human threshold. Temporal distance at which humans are expected to lose cross-reactivity.
+
+* $T_f$ - Ferret threshold. Temporal distance (years) from homologous strain at which ferrets are expected to lose cross-reactivity.
+* $T_h$ - Human threshold. Temporal distance at which humans are expected to lose cross-reactivity.
 
 ### We would want to include at least the following strains in the panel:
-(0) - Homologous strain
-{A} - Strain(s) temporally close to the homologous strain. (To help characterize the steepness of the landscape).
-{B} - Strains(s) just inside the ferret threshold, $T_f$.
-{C} - Strains(s) between the ferret and human threshold.
-{D} - Strains(s) just outside the human threshold.
+* (0) - Homologous strain
+* {A} - Strain(s) temporally close to the homologous strain. (To help characterize the steepness of the landscape).
+* {B} - Strains(s) just inside the ferret threshold, $T_f$.
+* {C} - Strains(s) between the ferret and human threshold.
+* {D} - Strains(s) just outside the human threshold.
 
 * Panel strains in the set {0, A, B} should almost always have measurable titers and can characterize landscape width, steepness, and height in ferrets and humans.
-* Panel strains in {C} are expected to have measurable titers in most humans, but few ferrets. Differences in cross-reactivity to {C} allow us to measure changes in ferret landscape breadth over time, and differences between ferrets and humans at the same timepoing. Ideally, {C} should contain more than one strain.
+* Panel strains in {C} are expected to have measurable titers in most humans, but few ferrets. Differences in cross-reactivity to {C} allow us to measure changes in ferret landscape breadth over time, and differences between ferrets and humans at the same timepoint. Ideally, {C} should contain more than one strain.
 * Some humans and no ferrets are expected to show titers to {D}. {D} Helps us measure the boundary of human cross-reactivity, and to measure changes with time, or dose in human cross-reactivity.
 
 
-# 1. Define the temporal breadth of cross-reactivity in ferrets ($T_f$), and humans ($T_h$)
+# 1. Use publicly available data to quantify the temporal breadth of cross-reactivity in ferrets ($T_f$), and humans ($T_h$)
 
 ## Ferret data
 
@@ -37,18 +38,243 @@ $T_h$ - Human threshold. Temporal distance at which humans are expected to lose 
 
 ## Human data
 
-* [Ha Nam data from Fonville et al. 2014 supplement](https://www-science-org.proxy.uchicago.edu/doi/10.1126/science.1256427). Data from 69 individuals tested against 23 strains. Individuals were sampled annually from 2007-2012. There were 12 PCR-confirmed infections (n=12), 36 seroconverters, and 32 individuals with no evidence of recent infection. We focus here on infections and seroconversions.
+* [Ha Nam data from Fonville et al. 2014 supplement](https://www-science-org.proxy.uchicago.edu/doi/10.1126/science.1256427). Data from 69 individuals tested against 23 strains. Individuals were sampled annually from 2007-2012. There were 12 PCR-confirmed infections (n=12), 36 seroconverters, and 32 individuals with no evidence of recent infection. We focus here on infections and seroconversions, and only analyze the serum sample proceeding the infection event.
 * [Fonville 2014 vaccine study data](https://www-science-org.proxy.uchicago.edu/doi/10.1126/science.1256427). Data from n=106 participants vaccinated against A/Nanchang/933/97 and n=128 vaccinated against A/Sydney/5/97.
 * [Fonville 2016 data](https://academic.oup.com/jid/article/213/1/31/2459222#supplementary-data) from 17 children presumed to have recent primary infections, tested against a panel of 23 strains.
 
 
-```{r}
-plot(cars)
+```{r echo=FALSE}
+library(tidyverse)
+source('strain_panel_analysis_funs.R')
+options(dplyr.summarise.inform = FALSE)
+filter <- dplyr::filter
 ```
 
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
 
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+dataset_list = list(Bedford_2014 = import_Bedford_2014_data(cross_reactive_threshold = 40),
+                    Fonville_2016_ferrets = import_Fonville_2016_ferret_data(cross_reactive_threshold = 40),
+                    HaNam_PCR_infections = import_HaNam_PCR_infections(cross_reactive_threshold = 40),
+                    HaNam_seroconversions = import_HaNam_seroconversions(cross_reactive_threshold = 40),
+                    HaNam_vaccine = import_HaNam_vaccine_study(cross_reactive_threshold = 40),
+                    Fonville_2016_children = import_Fonville_2016_human_data(cross_reactive_threshold = 40))
+```
 
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+\newpage
 
+## Plot for each dataset
+```{r cr_barplot, echo=FALSE, fig.cap="Cross-reactivity vs. temporal distance between the homologous strain and the test strain (years). Negative values on the x axis indicate that the test strain circulated in the past, relative to the homologous strain. The y-axis shows the fraction of titer measurements in the strain panel that were cross reactive (titer >=40). Bars show Wald confidence intervals, which is smaller for when the within-group n is large.", fig.height=6, fig.width=7, warning=FALSE}
+bind_rows(dataset_list) %>%
+    filter(!is.na(logtiter)) %>%
+    mutate(dt = test_strain_year-homologous_strain_year,
+           facet_lab = sprintf('%s %s response\n%s', host_type, exposure_no, dataset)) %>%
+    group_by(dt, is_cross_reactive, facet_lab,) %>%
+    summarise(count = n()) %>%
+    group_by(dt, facet_lab) %>%
+    mutate(fraction = count/sum(count),
+           lower = fraction - 1.96*sqrt(fraction*(1-fraction)/sum(count)),
+           upper = fraction + 1.96*sqrt(fraction*(1-fraction)/sum(count)),
+           lower = ifelse(is_cross_reactive, lower, NA),
+           upper = ifelse(is_cross_reactive, upper, NA)) %>%
+  ungroup() %>%
+  mutate(panel_lab = LETTERS[as.numeric(as.factor(facet_lab))]) %>%
+    ggplot() +
+    geom_bar(aes(x = dt, y = fraction, fill = is_cross_reactive), stat = 'identity', alpha = .5)+
+    geom_segment(aes(x = dt, xend = dt, y = lower, yend = upper))+
+    geom_vline(aes(xintercept = 0), lty = 2) +
+    geom_text(aes(x = -35, y = 1.1, label = panel_lab))+
+    facet_wrap(.~facet_lab) + 
+    theme(legend.position = 'bottom') +
+    xlab('year of strain circulation\n(relative to homologous strain)')+
+    ylab('fraction of titers >= 40')
+```
+
+OBSERVATIONS:
+
+* A, B: Strains that circulated >14 years apart rarely show cross-reactive titers in ferret HAI panels ([Smith et al. 2004](), [Bedford et al. 2014]()).
+* Primary responses in children (C) show slightly more temporal breadth than primary responses in ferrets (A,B).
+* Secondary responses to past strains show much more temporal breadth than primary responses (D-F, vs. A-C negative x values).
+* Secondary responses to future strains show only slightly greater breadth than that of primary responses (D-F, vs. A-C positive x values). However, this observation is limited by data availability. These panels contain mostly strains that circulated much earlier, not much later than the infecting strain.
+
+IMPLICATIONS:
+
+* We should analyze human samples collected at least 15y ago, if possible, so that we can assess cross-reactive breadth to future strains. Assessing cross-reactivity of secondary responses to past strains is not super informative due to OAS.
+* From here, we need to quantify the temporal threshold at which we expect ferrets and humans to lose cross-reactivity to future strains.
+
+-------------------------------
+
+# 2. Estimate the temporal distance at which ferrets and humans lose cross-reactivity
+
+**Approach**
+
+Fit a logistic regression to each dataset in order to quantify the probability of cross-reactivity ($P_c$), as a function of temporal distance from the homologous strain, $\tau$. Fit separate coefficients to past and future strains, and let $x$ indicate whether the test strain circulated before or after the homologous strain. The model is:
+
+$$ logit(P_c(\tau)) = \alpha + \beta_x \tau$$
+
+Using this logistic regression, we can estimate the threshold temporal distance, $\tau_x*$, at which the probability that a past or future strain cross-reacts with the homologous strain. We define $\tau_x*$ as the temporal distance at which $P_c(\tau)$ falls below 0.05 in each data set.
+
+
+
+```{r echo=FALSE}
+fit_one_logistic <- function(this_dataset){
+  ## Fit the model
+  this_fit = glm(is_cross_reactive ~ dt*past_future, family = 'binomial', data = this_dataset)
+  ## Output predicted probabilities and 95% CIs for each possible value
+  predictions = expand_grid(is_cross_reactive = c(TRUE, FALSE), dt = 0:40, past_future = c('past', 'future', 'concurrent')) %>%
+    filter(! (abs(dt)>0 & past_future == 'concurrent')) 
+  raw_predict = predict.glm(this_fit, newdata = predictions, type = 'response', se.fit = TRUE)
+  predictions = predictions %>% mutate(fit = raw_predict$fit, 
+                                       lower = raw_predict$fit - 1.96*raw_predict$se.fit,
+                                       upper = raw_predict$fit + 1.96*raw_predict$se.fit)
+  return(list(fit = this_fit,
+              predictions = predictions))
+}
+```
+
+## Fit the model to each dataset
+```{r message=FALSE, warning=FALSE}
+logistic_fits = lapply(dataset_list, fit_one_logistic)
+```
+
+
+```{r echo=FALSE}
+## Get threshold at which p(cross_reactive) falls below 5%
+threshold_df = lapply(logistic_fits, function(ll) ll$predictions) %>%
+  set_names(names(dataset_list)) %>%
+  bind_rows(.id = 'dataset') %>%
+  group_by(past_future, dataset) %>%
+  filter(fit <= 0.05) %>%
+  arrange(dt) %>%
+  summarise(threshold = dt[1]) %>%
+  ungroup() %>%
+  mutate(threshold = ifelse(past_future == 'past', -threshold, threshold))
+```
+
+```{r echo=FALSE}
+## Get facet labels
+facet_labs = bind_rows(dataset_list) %>%
+  select(dataset, exposure_no, host_type) %>%
+  distinct() %>%
+  mutate(facet_lab = sprintf('%s %s exposure\n%s', host_type, exposure_no, dataset),
+          panel_lab = LETTERS[as.numeric(as.factor(facet_lab))])
+```
+
+\newpage 
+
+## Plot logistic fits
+```{r logisticplot, echo=FALSE, fig.cap="Logistic regression showing the probability of cross-reactivity as a function of temporal distance from the homologous strain. The dotted horizontal line shows P=0.05. The dotted vertical line and annotation shows the threshold at which the fitted probability crosses 0.05, indicating that cross-reactivity is lost.", fig.height=6, fig.width=7, message=FALSE, warning=FALSE}
+lapply(logistic_fits, function(ll) ll$predictions) %>%
+  set_names(names(dataset_list)) %>%
+  bind_rows(.id = 'dataset') %>%
+  mutate(dt = ifelse(past_future == 'past', -dt, dt),
+         upper = pmin(upper, 1),
+         lower = pmax(lower, 0)) %>%
+  merge(threshold_df, all.x = T) %>%
+  merge(facet_labs, all.x = T) %>%
+  filter(is_cross_reactive) %>%
+  ggplot() +
+  geom_line(aes(x = dt, y = fit), color = 'blue3') +
+  geom_ribbon(aes(x = dt, ymin = lower, ymax = upper), fill = 'blue3', alpha = .3) +
+  geom_vline(aes(xintercept = threshold), lty = 3)+
+  geom_hline(aes(yintercept = .05), lty = 3) +
+  geom_text(aes(x = threshold+5, y = .98, label = sprintf('%iy', threshold)))+
+  facet_wrap(.~facet_lab)+
+  geom_text(aes(x = -40, y = 1, label = panel_lab))+
+  xlab('year of strain circulation\n(relative to homologous strain)')+
+  ylab('probability that strains cross-react\n(titer >= 40)')
+```
+
+
+OBSERVATIONS:
+
+* Ferrets lose cross-reactivity to strains that circulated >14y from the homologous strain, as reported previously by Bedford et al. 2014 and Smith et al. 2004 (A,B).
+* Primarily infected children (C) show somewhat greater temporal breadth than primarily infected ferrets, both to past and future strains.
+* Uncertainty in the temporal breadth of cross-reactivity to future strains is highly uncertain in human antisera after infection (C, D, E), because serum samples are typically analyzed just a few years after collection, which limits the availability of titer measurements to future strains.
+* The temporal breadth of cross-reactivity to past strains in secondary responses extends beyond 40y (D, E, F).
+* The temporal breadth of cross-reactivity to future strains after vaccination in adults (F) is comparable to the temporal breadth of cross-reactivity in ferrets (A,B) and primarily infected children (C).
+
+
+
+IMPLICATIONS FOR DATA COLLECTION:
+
+* The temporal breadth of cross-reactivity to past or future strains 10-14y for primary ferret antisera.
+* The temporal breadth of cross-reactivity to past or future strains is 14-23y for primary human antisera. 
+* The temporal breadth of cross-reactivity to future strains is c. 14y for secondary human antisera. There is no measurable limit to the breadth of cross-reactivity to past strains for secondary antisera.
+
+
+------
+
+# Bringing this back to the conceptual outline in Fig. 1
+
+```{r echo=FALSE}
+final_thresholds = tibble(host_type = c('ferret', 'ferret', 'human', 'human', 'human', 'human'),
+                          exposure_no = c('primary', 'primary', 'primary', 'primary', 'secondary', 'secondary'),
+                          past_future = c('past', 'future','past', 'future', 'past', 'future'),
+                          tau = c(-12, 12, -14, 14, -20, 14),
+                          p_cross_react = c(0,0,0,0,.5,0)) %>%
+  mutate(kind = sprintf('%s %s reponse', host_type, exposure_no))
+```
+
+
+```{r echo=FALSE, fig.cap='Version of Fig. 1 with calculated threshold distances. The x-axis shows both relative years of strain circulation [-20, 20], and calendar years, assuming that currently circulating strains are 20 years advanced from the homologous strain.'}
+final_thresholds %>%
+ggplot() +
+  geom_segment(aes(x = tau, y = p_cross_react, xend = 0, yend = 1, color = kind, lty = kind), alpha = .6, lwd = 2)+
+  theme(legend.position = 'bottom') +
+  xlab('temporal distance from homologous strain (y)') +
+  geom_vline(aes(xintercept = 0), lty = 3)+
+  geom_vline(aes(xintercept = 12), lty = 3)+
+  geom_vline(aes(xintercept = 14), lty = 3)+
+  geom_vline(aes(xintercept = -12), lty = 3)+
+  geom_vline(aes(xintercept = -14), lty = 3) +
+  geom_text(aes(x = 5, y = 0, label = '{a}'))+
+  geom_text(aes(x = 11, y = 0, label = '{b}'))+
+  geom_text(aes(x = 13, y = 0, label = '{c}'))+
+  geom_text(aes(x = 15, y = 0, label = '{d}'))+
+  geom_text(aes(x = -5, y = 0, label = '{e}'))+
+  geom_text(aes(x = -11, y = 0, label = '{f}'))+
+  geom_text(aes(x = -13, y = 0, label = '{g}'))+
+  geom_text(aes(x = -15, y = 0, label = '{h}'))+
+  scale_x_continuous(breaks = seq(-20, 20, by = 5), labels = sprintf('%i\n%i', seq(-20, 20, 5), 2022-20+seq(-20, 20, 5)), limits = c(-20, 20))
+```
+
+
+### We would want to include at least the following strains in the panel:
+
+* (0) - Homologous strain from c.2002
+
+FUTURE STRAINS
+
+* {a} - Strain(s) from c.2007.
+* {b} - Strains(s) just inside the ferret threshold, from 2012, 2013, and 2014.
+* {c} - Strains(s) between the ferret and human threshold, from 2015, 2016.
+* {d} - Strains(s) just outside the human threshold, from 2017, 2018, ... present.
+
+
+PAST STRAINS
+
+* {e} - Strain(s) from c.1997.
+* {f} - Strains(s) just inside the ferret threshold, from 1990, 1991, 1992.
+* {g} - Strains(s) between the ferret and human threshold, from 1988, 1989.
+* {h} - Strains(s) just outside the human threshold, from 1968-1987.
+
+TOTAL:
+ 
+  1 homologous strain
+
++ 9 future strains
+
++ 9 past strains
+
+=
+
+19 total strains
+
+
+## To do tomorrow - In what years did H1N1 and H3N2 actually circulate (Flu View)
+
+## Some other issues to think about:
+
+* If we're going to be analyzing recent H3N2 strains, HAI may not work.
+* The 2009 pandemic makes things weird for H1N1.
+* Should we go even further back in time to avoid these issues?
