@@ -70,7 +70,7 @@ individual_distances %>%
 ggsave('../plots/subject_titers.png', width = 9, height = 7, units = 'in', dpi = 300)
 ```
 
-## Replot without annotation for build
+## Replot without annotation for build slide
 ```{r}
 individual_distances %>%
    mutate(undetectable_titers = ifelse(logtiter<0, logtiter, NA)) %>%
@@ -180,6 +180,38 @@ merged_distances %>%
 ggsave('../plots/high_responder_comparison.png', width = 9, height = 6, dpi = 300, units = 'in')
 ```
 
+
+
+```{r}
+merged_distances %>%
+  filter(is_high_responder) %>%
+  filter(subject == 'S04-2') %>%
+  mutate(ribbon_vals = ifelse(circulated_in_infection_window, as.numeric(strain), NA),
+         adjusted_ferret_distance = adjust_ferret_distances(ferret_map_distance, `past/future`),
+         expected_logtiter_ferret_distance = homologous_titer - ferret_map_distance,
+         expected_logtiter_adjusted_distance = homologous_titer - adjusted_ferret_distance,
+         is_undetectable = ifelse(logtiter<0, logtiter, NA)) %>%
+  ggplot() +
+  geom_point(aes(x = strain, y = logtiter), color = NA) +
+  geom_ribbon(aes(x = x_dodge, ymin = -10, ymax = 0), fill = 'gray', alpha = .5) +
+  geom_ribbon(aes(x = ribbon_vals, ymin = -10, ymax = 8), fill = 'aquamarine', alpha = .5) +
+  geom_hline(aes(yintercept = 0), lty = 3)+
+  geom_hline(aes(yintercept = homologous_titer), lty = 2)+
+  geom_vline(aes(xintercept = putative_primary_strain), lty = 3)+
+  geom_segment(aes(x = x_dodge, xend = x_dodge, y = logtiter, yend = expected_logtiter_ferret_distance), color = 'firebrick2', lty = 2) +
+  geom_segment(aes(x = x_dodge, xend = x_dodge, y = homologous_titer, yend = logtiter, lty = logtiter<0), show.legend = F) +
+  geom_point(aes(x = x_dodge, y = logtiter)) +
+  geom_point(aes(x = x_dodge, y = is_undetectable), pch = 23, fill = 'gray') +
+  geom_segment(aes(x = x_dodge-.2, xend = x_dodge+.2, y = expected_logtiter_ferret_distance, yend = expected_logtiter_ferret_distance), color = 'firebrick2') +
+ # geom_segment(aes(x = x_dodge-.2, xend = x_dodge+.2, y = expected_logtiter_adjusted_distance, yend = expected_logtiter_adjusted_distance), color = 'deepskyblue') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(.~subject_label) +
+  ylab('log2 titer')
+ggsave('../../draft_manuscript_figures/plots/primary_representative_indiv.png', width = 4, height = 3, dpi = 300, units = 'in')
+```
+
+
+
 ```{r}
 merged_distances %>%
   filter(is_high_responder) %>%
@@ -203,7 +235,7 @@ merged_distances %>%
  # geom_segment(aes(x = x_dodge-.2, xend = x_dodge+.2, y = expected_logtiter_adjusted_distance, yend = expected_logtiter_adjusted_distance), color = 'deepskyblue') +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_wrap(.~subject_label) +
-  ylab('distance from primary strain') +
+  ylab('log2 titer') +
   ggtitle('High responders')
 ggsave('../plots/high_responder_comparison_build0.png', width = 9, height = 6, dpi = 300, units = 'in')
 ```
@@ -496,6 +528,96 @@ merged_byyear = bind_rows(ferret_byyear,
   mutate(kind = sprintf('%s distances: %s strains', kind, ifelse(dy<0, 'past', 'future'))) 
 ```
 
+
+## Replicate the individual-ferret comparison plots from above
+```{r}
+## PCR-confirmed infections
+read_csv('../../Ha_Nam/processed_data/PCR_infections.csv') %>%
+  filter(`Infection Time` == `Sample year`) %>%  
+  mutate(logtiter = ifelse(logtiter<0, NA, logtiter),
+         homologous_titer = ifelse(logtiter<0, NA, homologous_titer),
+         ferret_map_distance = ifelse(logtiter<0, NA, ferret_distance)) %>%
+  mutate(expected_logtiter_ferret_distance = homologous_titer - ferret_distance,
+         is_undetectable = ifelse(logtiter<0, logtiter, NA),
+         subject_label = sprintf('%s, YOB:%s, S:%s', `Subject number`, YOB, `Sample year`)) %>%
+  merge(read_csv('../../Ha_Nam/processed_data/HaNam_longshort_strain_names.csv') %>%
+          rename(test_strain = long_name),
+        all_x = T) %>%
+  mutate(test_strain = factor(test_strain, levels = get_strains_chronologically(test_strain, test_strain_year), labels = get_strains_chronologically(short_name, test_strain_year))) %>%
+  mutate(x_coord = as.numeric(test_strain),
+         ribbon_vals = ifelse(is_homologous_strain, as.numeric(as.factor(x_coord)), NA)) %>%
+  ## Summarize so that there is one homologous titer per individual
+  group_by(subject_label, test_strain, x_coord) %>%
+  summarise(logtiter = unique(logtiter),
+            homologous_titer = mean(homologous_titer),
+            ferret_distance = mean(ferret_map_distance),
+            expected_logtiter_ferret_distance = homologous_titer - ferret_distance,
+            is_homologous_strain = unique(is_homologous_strain),
+            ribbon_vals = unique(ribbon_vals)) %>%
+  ggplot() +
+  geom_point(aes(x = test_strain, y = logtiter, group = subject_label), color = NA) +
+  geom_ribbon(aes(x = x_coord, ymin = -10, ymax = 0), fill = 'gray', alpha = .5) +
+  geom_ribbon(aes(x = ribbon_vals, ymin = -10, ymax = 8), fill = 'aquamarine', alpha = .5) +
+  geom_vline(aes(xintercept = ribbon_vals), lty = 2, color = 'aquamarine')+
+  geom_hline(aes(yintercept = 0), lty = 3)+
+  geom_hline(aes(yintercept = homologous_titer), lty = 2)+
+  geom_vline(aes(xintercept = is_homologous_strain), lty = 2, color = 'springgreen3')+
+  geom_segment(aes(x = x_coord, xend = x_coord, y = logtiter, yend = expected_logtiter_ferret_distance), color = 'firebrick2', lty = 2) +
+  geom_segment(aes(x = x_coord, xend = x_coord, y = homologous_titer, yend = logtiter, lty = logtiter<0), show.legend = F) +
+  geom_point(aes(x = x_coord, y = logtiter)) +
+  geom_segment(aes(x = x_coord-.2, xend = x_coord+.2, y = expected_logtiter_ferret_distance, yend = expected_logtiter_ferret_distance),  color = 'firebrick2') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(.~subject_label) +
+  ylab('log2 titer') +
+  xlab('strain')
+ggsave('../plots/secondary_infection_comparison.png', width = 9, height = 6, dpi = 300, units = 'in')
+```
+
+
+```{r}
+## PCR-confirmed infections
+read_csv('../../Ha_Nam/processed_data/PCR_infections.csv') %>%
+  filter(`Infection Time` == `Sample year`) %>%  
+  filter(`Subject number` == 1) %>%
+  mutate(logtiter = ifelse(logtiter<0, NA, logtiter),
+         homologous_titer = ifelse(logtiter<0, NA, homologous_titer),
+         ferret_map_distance = ifelse(logtiter<0, NA, ferret_distance)) %>%
+  mutate(expected_logtiter_ferret_distance = homologous_titer - ferret_distance,
+         is_undetectable = ifelse(logtiter<0, logtiter, NA),
+         subject_label = sprintf('%s, YOB:%s, S:%s', `Subject number`, YOB, `Sample year`)) %>%
+  merge(read_csv('../../Ha_Nam/processed_data/HaNam_longshort_strain_names.csv') %>%
+          rename(test_strain = long_name),
+        all_x = T) %>%
+  mutate(test_strain = factor(test_strain, levels = get_strains_chronologically(test_strain, test_strain_year), labels = get_strains_chronologically(short_name, test_strain_year))) %>%
+  mutate(x_coord = as.numeric(test_strain),
+         ribbon_vals = ifelse(is_homologous_strain, as.numeric(as.factor(x_coord)), NA)) %>%
+  ## Summarize so that there is one homologous titer per individual
+  group_by(subject_label, test_strain, x_coord) %>%
+  summarise(logtiter = unique(logtiter),
+            homologous_titer = mean(homologous_titer),
+            ferret_distance = mean(ferret_map_distance),
+            expected_logtiter_ferret_distance = homologous_titer - ferret_distance,
+            is_homologous_strain = unique(is_homologous_strain),
+            ribbon_vals = unique(ribbon_vals)) %>%
+  ggplot() +
+  geom_point(aes(x = test_strain, y = logtiter, group = subject_label), color = NA) +
+  geom_ribbon(aes(x = x_coord, ymin = -15, ymax = 0), fill = 'gray', alpha = .5) +
+  geom_ribbon(aes(x = ribbon_vals, ymin = -15, ymax = 10), fill = 'aquamarine', alpha = .5) +
+  geom_vline(aes(xintercept = ribbon_vals), lty = 2, color = 'aquamarine')+
+  geom_hline(aes(yintercept = 0), lty = 3)+
+  geom_hline(aes(yintercept = homologous_titer), lty = 2)+
+  geom_vline(aes(xintercept = is_homologous_strain), lty = 2, color = 'springgreen3')+
+  geom_segment(aes(x = x_coord, xend = x_coord, y = logtiter, yend = expected_logtiter_ferret_distance), color = 'firebrick2', lty = 2) +
+  geom_segment(aes(x = x_coord, xend = x_coord, y = homologous_titer, yend = logtiter, lty = logtiter<0), show.legend = F) +
+  geom_point(aes(x = x_coord, y = logtiter)) +
+  geom_segment(aes(x = x_coord-.2, xend = x_coord+.2, y = expected_logtiter_ferret_distance, yend = expected_logtiter_ferret_distance),  color = 'firebrick2') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(.~subject_label) +
+  ylab('log2 titer') +
+  xlab('strain')
+ggsave('../../draft_manuscript_figures/plots/secondary_representative_indiv.png', width = 4, height = 3, dpi = 300, units = 'in')
+```
+
 ## Fit regressions by ferret distance for children
 
 
@@ -689,7 +811,7 @@ x_lims = tibble(`past/future` = c(' past strains', ' future strains'),
                 xmax = c(0, max(abs(merged_byyear$ferret_distance), na.rm = T))) %>%
   mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains'))) %>%
   pivot_longer(-1)
-x_lims$value = x_lims$value + c(36, 36, 0, 0) 
+#x_lims$value = x_lims$value + c(36, 36, 0, 0) 
 
 comparison_plot_distance = merged_byyear %>%
   filter(!grepl('ferret', kind)) %>%
@@ -700,7 +822,7 @@ comparison_plot_distance = merged_byyear %>%
          lab_y = 8,
          ferret_distance = ifelse(`past/future` == ' past strains', -ferret_distance, ferret_distance)) %>%
   merge(lm_fits_table_by_ferretdistance) %>%
-    mutate(ferret_distance_binned = factor(floor(ferret_distance)),
+    mutate(ferret_distance_binned = factor(floor(ferret_distance), levels = sort(unique(floor(ferret_distance))), labels = abs(sort(unique(floor(ferret_distance))))),
            nbin = as.numeric(ferret_distance_binned)) %>%
   ggplot() +
   geom_violin(aes(x = ferret_distance_binned, y = distance), alpha = .7)+
@@ -709,15 +831,72 @@ comparison_plot_distance = merged_byyear %>%
   geom_hline(aes(yintercept=0),lty=3)+
 #  geom_blank(aes(x =value+36, y = 1), data = x_lims)+
   geom_abline(aes(intercept = ifelse(`past/future`==' past strains', 36, 0), slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
+    geom_blank(aes(x = value, y = 1), data = x_lims)+
  # scale_color_manual(values = c('salmon', 'mediumturquoise', 'goldenrod', 'yellow3', 'red', 'slateblue4',  'red', 'dodgerblue')) +
   xlab('ferret distance from homologous strain to test strain') +
   facet_grid(`distance type`~`past/future`, scales = 'free_x')+
   ylab('distance')+
   scale_color_manual(values = c('chartreuse4', 'cornflowerblue', 'orange', 'gray'))+
-  ylim(c(-8, 10))
+  ylim(c(-8, 10)) +
+  theme_classic() 
 comparison_plot_distance
-ggsave(plot = comparison_plot_distance, '../plots/distance_violins.png', width = 9, height = 9, dpi = 250, units = 'in')
+ggsave(plot = comparison_plot_distance, '../plots/distance_violins.png', width = 12, height = 6, dpi = 250, units = 'in')
 ```
+
+```{r}
+past_violins = merged_byyear %>%
+  filter(!grepl('ferret', kind)) %>%
+  separate(kind, into = c( 'distance type', 'past/future'), sep = ":", remove = F) %>%
+  filter(`past/future` == ' past strains') %>%
+  mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains')),
+         `distance type` = factor(`distance type`, levels = c('ferret distances','child distances', 'vaccine study distances', 'HaNam PCR infection distances'), labels = c('ferrets','primary infections', 'secondary vaccinations', 'secondary infections'),  ordered = TRUE),
+         ferret_distance = ifelse(`past/future` == ' past strains', -ferret_distance, ferret_distance)) %>%
+  merge(lm_fits_table_by_ferretdistance) %>%
+    mutate(ferret_distance_binned = factor(floor(ferret_distance), levels = sort(unique(floor(ferret_distance))), labels = abs(sort(unique(floor(ferret_distance))))),
+           nbin = as.numeric(ferret_distance_binned)) %>%
+  ggplot() +
+  geom_violin(aes(x = ferret_distance_binned, y = distance), alpha = .7)+
+  geom_hline(aes(yintercept=0),lty=3)+
+  geom_abline(aes(intercept = ifelse(`past/future`==' past strains', 36, 0), slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
+  xlab('ferret distance from homologous strain to test strain') +
+  facet_grid(`distance type`~`past/future`, scales = 'free_x')+
+  ylab('distance')+
+  scale_color_manual(values = c('chartreuse4', 'cornflowerblue', 'orange', 'gray'))+
+  ylim(c(-8, 15)) +
+  theme(axis.text.x = element_text(angle = 90)) 
+
+
+future_violins = merged_byyear %>%
+  filter(!grepl('ferret', kind)) %>%
+  separate(kind, into = c( 'distance type', 'past/future'), sep = ":", remove = F) %>%
+  filter(`past/future` == ' future strains') %>%
+  mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains')),
+         `distance type` = factor(`distance type`, levels = c('ferret distances','child distances', 'vaccine study distances', 'HaNam PCR infection distances'), labels = c('ferrets','primary infections', 'secondary vaccinations', 'secondary infections'),  ordered = TRUE),
+         ferret_distance = ifelse(`past/future` == ' past strains', -ferret_distance, ferret_distance)) %>%
+  merge(lm_fits_table_by_ferretdistance) %>%
+    mutate(ferret_distance_binned = factor(floor(ferret_distance), levels = sort(unique(floor(ferret_distance))), labels = abs(sort(unique(floor(ferret_distance))))),
+           nbin = as.numeric(ferret_distance_binned)) %>%
+  ggplot() +
+  geom_violin(aes(x = ferret_distance_binned, y = distance), alpha = .7)+
+  geom_hline(aes(yintercept=0),lty=3)+
+  geom_abline(aes(intercept = ifelse(`past/future`==' past strains', 36, 0), slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
+  xlab('ferret distance from homologous strain to test strain') +
+  facet_grid(`distance type`~`past/future`, scales = 'free_x')+
+  ylab('distance')+
+  scale_color_manual(values = c('chartreuse4', 'cornflowerblue', 'orange', 'gray'))+
+  ylim(c(-8, 15)) +
+  theme(axis.text.x = element_text(angle = 90)) 
+
+cowplot::plot_grid(past_violins,
+                   future_violins,
+                   ncol = 2, rel_widths = c(1, .5))
+
+
+ggsave('../plots/distance_violins.png', width = 12, height = 6, dpi = 250, units = 'in')
+ggsave('../../draft_manuscript_figures/distance_violins.png', width = 12, height = 6, dpi = 250, units = 'in')
+```
+
+
 
 
 ```{r}
@@ -744,7 +923,7 @@ comparison_plot_distance = merged_byyear %>%
   scale_color_manual(values = c('chartreuse4', 'cornflowerblue', 'orange', 'gray'))+
   ylim(c(-8, 10))
 comparison_plot_distance
-ggsave(plot = comparison_plot_distance, '../plots/dy_violins.png', width = 9, height = 9, dpi = 250, units = 'in')
+ggsave(plot = comparison_plot_distance, '../plots/dy_violins.png', width = 12, height = 9, dpi = 250, units = 'in')
 ```
 
 

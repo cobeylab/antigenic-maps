@@ -157,3 +157,9 @@ primary_strain_table <- function(individual_distances){
     summarise() %>%
     filter(!is.na(putative_primary_strain))
 }
+
+get_short_strain_name <- function(long_name){
+  sapply(long_name, function(xx){
+    gsub(pattern = '\\w?(A/\\w\\w)\\w+(/\\w+/)\\d?\\d?(\\d\\d)', replacement = '\\1\\2\\3', x = xx)
+  })
+}
