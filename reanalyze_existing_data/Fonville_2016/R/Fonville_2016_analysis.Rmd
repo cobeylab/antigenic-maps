@@ -70,7 +70,7 @@ individual_distances %>%
 ggsave('../plots/subject_titers.png', width = 9, height = 7, units = 'in', dpi = 300)
 ```
 
-## Replot without annotation for build
+## Replot without annotation for build slide
 ```{r}
 individual_distances %>%
    mutate(undetectable_titers = ifelse(logtiter<0, logtiter, NA)) %>%
@@ -180,6 +180,38 @@ merged_distances %>%
 ggsave('../plots/high_responder_comparison.png', width = 9, height = 6, dpi = 300, units = 'in')
 ```
 
+
+
+```{r}
+merged_distances %>%
+  filter(is_high_responder) %>%
+  filter(subject == 'S04-2') %>%
+  mutate(ribbon_vals = ifelse(circulated_in_infection_window, as.numeric(strain), NA),
+         adjusted_ferret_distance = adjust_ferret_distances(ferret_map_distance, `past/future`),
+         expected_logtiter_ferret_distance = homologous_titer - ferret_map_distance,
+         expected_logtiter_adjusted_distance = homologous_titer - adjusted_ferret_distance,
+         is_undetectable = ifelse(logtiter<0, logtiter, NA)) %>%
+  ggplot() +
+  geom_point(aes(x = strain, y = logtiter), color = NA) +
+  geom_ribbon(aes(x = x_dodge, ymin = -10, ymax = 0), fill = 'gray', alpha = .5) +
+  geom_ribbon(aes(x = ribbon_vals, ymin = -10, ymax = 8), fill = 'aquamarine', alpha = .5) +
+  geom_hline(aes(yintercept = 0), lty = 3)+
+  geom_hline(aes(yintercept = homologous_titer), lty = 2)+
+  geom_vline(aes(xintercept = putative_primary_strain), lty = 3)+
+  geom_segment(aes(x = x_dodge, xend = x_dodge, y = logtiter, yend = expected_logtiter_ferret_distance), color = 'firebrick2', lty = 2) +
+  geom_segment(aes(x = x_dodge, xend = x_dodge, y = homologous_titer, yend = logtiter, lty = logtiter<0), show.legend = F) +
+  geom_point(aes(x = x_dodge, y = logtiter)) +
+  geom_point(aes(x = x_dodge, y = is_undetectable), pch = 23, fill = 'gray') +
+  geom_segment(aes(x = x_dodge-.2, xend = x_dodge+.2, y = expected_logtiter_ferret_distance, yend = expected_logtiter_ferret_distance), color = 'firebrick2') +
+ # geom_segment(aes(x = x_dodge-.2, xend = x_dodge+.2, y = expected_logtiter_adjusted_distance, yend = expected_logtiter_adjusted_distance), color = 'deepskyblue') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(.~subject_label) +
+  ylab('log2 titer')
+ggsave('../../draft_manuscript_figures/plots/primary_representative_indiv.png', width = 3, height = 3, dpi = 300, units = 'in')
+```
+
+
+
 ```{r}
 merged_distances %>%
   filter(is_high_responder) %>%
@@ -203,7 +235,7 @@ merged_distances %>%
  # geom_segment(aes(x = x_dodge-.2, xend = x_dodge+.2, y = expected_logtiter_adjusted_distance, yend = expected_logtiter_adjusted_distance), color = 'deepskyblue') +
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
   facet_wrap(.~subject_label) +
-  ylab('distance from primary strain') +
+  ylab('log2 titer') +
   ggtitle('High responders')
 ggsave('../plots/high_responder_comparison_build0.png', width = 9, height = 6, dpi = 300, units = 'in')
 ```
@@ -494,6 +526,96 @@ merged_byyear = bind_rows(ferret_byyear,
                           vaccine_1997,
                           PCR_infections) %>%
   mutate(kind = sprintf('%s distances: %s strains', kind, ifelse(dy<0, 'past', 'future'))) 
+```
+
+
+## Replicate the individual-ferret comparison plots from above
+```{r}
+## PCR-confirmed infections
+read_csv('../../Ha_Nam/processed_data/PCR_infections.csv') %>%
+  filter(`Infection Time` == `Sample year`) %>%  
+  mutate(logtiter = ifelse(logtiter<0, NA, logtiter),
+         homologous_titer = ifelse(logtiter<0, NA, homologous_titer),
+         ferret_map_distance = ifelse(logtiter<0, NA, ferret_distance)) %>%
+  mutate(expected_logtiter_ferret_distance = homologous_titer - ferret_distance,
+         is_undetectable = ifelse(logtiter<0, logtiter, NA),
+         subject_label = sprintf('%s, YOB:%s, S:%s', `Subject number`, YOB, `Sample year`)) %>%
+  merge(read_csv('../../Ha_Nam/processed_data/HaNam_longshort_strain_names.csv') %>%
+          rename(test_strain = long_name),
+        all_x = T) %>%
+  mutate(test_strain = factor(test_strain, levels = get_strains_chronologically(test_strain, test_strain_year), labels = get_strains_chronologically(short_name, test_strain_year))) %>%
+  mutate(x_coord = as.numeric(test_strain),
+         ribbon_vals = ifelse(is_homologous_strain, as.numeric(as.factor(x_coord)), NA)) %>%
+  ## Summarize so that there is one homologous titer per individual
+  group_by(subject_label, test_strain, x_coord) %>%
+  summarise(logtiter = unique(logtiter),
+            homologous_titer = mean(homologous_titer),
+            ferret_distance = mean(ferret_map_distance),
+            expected_logtiter_ferret_distance = homologous_titer - ferret_distance,
+            is_homologous_strain = unique(is_homologous_strain),
+            ribbon_vals = unique(ribbon_vals)) %>%
+  ggplot() +
+  geom_point(aes(x = test_strain, y = logtiter, group = subject_label), color = NA) +
+  geom_ribbon(aes(x = x_coord, ymin = -10, ymax = 0), fill = 'gray', alpha = .5) +
+  geom_ribbon(aes(x = ribbon_vals, ymin = -10, ymax = 8), fill = 'aquamarine', alpha = .5) +
+  geom_vline(aes(xintercept = ribbon_vals), lty = 2, color = 'aquamarine')+
+  geom_hline(aes(yintercept = 0), lty = 3)+
+  geom_hline(aes(yintercept = homologous_titer), lty = 2)+
+  geom_vline(aes(xintercept = is_homologous_strain), lty = 2, color = 'springgreen3')+
+  geom_segment(aes(x = x_coord, xend = x_coord, y = logtiter, yend = expected_logtiter_ferret_distance), color = 'firebrick2', lty = 2) +
+  geom_segment(aes(x = x_coord, xend = x_coord, y = homologous_titer, yend = logtiter, lty = logtiter<0), show.legend = F) +
+  geom_point(aes(x = x_coord, y = logtiter)) +
+  geom_segment(aes(x = x_coord-.2, xend = x_coord+.2, y = expected_logtiter_ferret_distance, yend = expected_logtiter_ferret_distance),  color = 'firebrick2') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(.~subject_label) +
+  ylab('log2 titer') +
+  xlab('strain')
+ggsave('../plots/secondary_infection_comparison.png', width = 9, height = 6, dpi = 300, units = 'in')
+```
+
+
+```{r}
+## PCR-confirmed infections
+read_csv('../../Ha_Nam/processed_data/PCR_infections.csv') %>%
+  filter(`Infection Time` == `Sample year`) %>%  
+  filter(`Subject number` == 1) %>%
+  mutate(logtiter = ifelse(logtiter<0, NA, logtiter),
+         homologous_titer = ifelse(logtiter<0, NA, homologous_titer),
+         ferret_map_distance = ifelse(logtiter<0, NA, ferret_distance)) %>%
+  mutate(expected_logtiter_ferret_distance = homologous_titer - ferret_distance,
+         is_undetectable = ifelse(logtiter<0, logtiter, NA),
+         subject_label = sprintf('%s, YOB:%s, S:%s', `Subject number`, YOB, `Sample year`)) %>%
+  merge(read_csv('../../Ha_Nam/processed_data/HaNam_longshort_strain_names.csv') %>%
+          rename(test_strain = long_name),
+        all_x = T) %>%
+  mutate(test_strain = factor(test_strain, levels = get_strains_chronologically(test_strain, test_strain_year), labels = get_strains_chronologically(short_name, test_strain_year))) %>%
+  mutate(x_coord = as.numeric(test_strain),
+         ribbon_vals = ifelse(is_homologous_strain, as.numeric(as.factor(x_coord)), NA)) %>%
+  ## Summarize so that there is one homologous titer per individual
+  group_by(subject_label, test_strain, x_coord) %>%
+  summarise(logtiter = unique(logtiter),
+            homologous_titer = mean(homologous_titer),
+            ferret_distance = mean(ferret_map_distance),
+            expected_logtiter_ferret_distance = homologous_titer - ferret_distance,
+            is_homologous_strain = unique(is_homologous_strain),
+            ribbon_vals = unique(ribbon_vals)) %>%
+  ggplot() +
+  geom_point(aes(x = test_strain, y = logtiter, group = subject_label), color = NA) +
+  geom_ribbon(aes(x = x_coord, ymin = -15, ymax = 0), fill = 'gray', alpha = .5) +
+  geom_ribbon(aes(x = ribbon_vals, ymin = -15, ymax = 10), fill = 'aquamarine', alpha = .5) +
+  geom_vline(aes(xintercept = ribbon_vals), lty = 2, color = 'aquamarine')+
+  geom_hline(aes(yintercept = 0), lty = 3)+
+  geom_hline(aes(yintercept = homologous_titer), lty = 2)+
+  geom_vline(aes(xintercept = is_homologous_strain), lty = 2, color = 'springgreen3')+
+  geom_segment(aes(x = x_coord, xend = x_coord, y = logtiter, yend = expected_logtiter_ferret_distance), color = 'firebrick2', lty = 2) +
+  geom_segment(aes(x = x_coord, xend = x_coord, y = homologous_titer, yend = logtiter, lty = logtiter<0), show.legend = F) +
+  geom_point(aes(x = x_coord, y = logtiter)) +
+  geom_segment(aes(x = x_coord-.2, xend = x_coord+.2, y = expected_logtiter_ferret_distance, yend = expected_logtiter_ferret_distance),  color = 'firebrick2') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  facet_wrap(.~subject_label) +
+  ylab('log2 titer') +
+  xlab('strain')
+ggsave('../plots/one_example_secondary_infection_comparison.png', width = 9, height = 6, dpi = 300, units = 'in')
 ```
 
 ## Fit regressions by ferret distance for children
