@@ -121,6 +121,8 @@ PCR_infections = merge(PCR_infections,
                    homologous_strain = strain1),
           by = c('homologous_strain', 'test_strain'), all_x = TRUE, all_y = FALSE)
 
+write_csv(PCR_infections %>% dplyr::select(test_strain) %>% distinct(), '../processed_data/PCR_infections_strain_names.csv')
+
 write_csv(PCR_infections, '../processed_data/PCR_infections.csv')
 ```
 
