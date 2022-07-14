@@ -679,6 +679,75 @@ ggsave(plot = comparison_plot_distance, '../plots/distances_by_distance_child_fe
 ```
 
 
+## Re-plot using violins
+
+
+
+```{r}
+x_lims = tibble(`past/future` = c(' past strains', ' future strains'),
+                xmin = c(-max(abs(merged_byyear$ferret_distance), na.rm = T), 0),
+                xmax = c(0, max(abs(merged_byyear$ferret_distance), na.rm = T))) %>%
+  mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains'))) %>%
+  pivot_longer(-1)
+x_lims$value = x_lims$value + c(36, 36, 0, 0) 
+
+comparison_plot_distance = merged_byyear %>%
+  filter(!grepl('ferret', kind)) %>%
+  separate(kind, into = c( 'distance type', 'past/future'), sep = ":", remove = F) %>%
+  mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains')),
+         `distance type` = factor(`distance type`, levels = c('ferret distances','child distances', 'vaccine study distances', 'HaNam PCR infection distances'), ordered = TRUE),
+         lab_x = ifelse(`past/future` == ' past strains', -20, 10),
+         lab_y = 8,
+         ferret_distance = ifelse(`past/future` == ' past strains', -ferret_distance, ferret_distance)) %>%
+  merge(lm_fits_table_by_ferretdistance) %>%
+    mutate(ferret_distance_binned = factor(floor(ferret_distance)),
+           nbin = as.numeric(ferret_distance_binned)) %>%
+  ggplot() +
+  geom_violin(aes(x = ferret_distance_binned, y = distance), alpha = .7)+
+  #geom_smooth(aes(x = ferret_distance, y = distance, group = kind), method = 'lm', color = 'black') +
+  #geom_text(aes(x = lab_x, y = lab_y, label = sprintf('%2.2f%s\nR2=%2.2f', slope, slope_pval_star, rsquared)), hjust = 0)+
+  geom_hline(aes(yintercept=0),lty=3)+
+#  geom_blank(aes(x =value+36, y = 1), data = x_lims)+
+  geom_abline(aes(intercept = ifelse(`past/future`==' past strains', 36, 0), slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
+ # scale_color_manual(values = c('salmon', 'mediumturquoise', 'goldenrod', 'yellow3', 'red', 'slateblue4',  'red', 'dodgerblue')) +
+  xlab('ferret distance from homologous strain to test strain') +
+  facet_grid(`distance type`~`past/future`, scales = 'free_x')+
+  ylab('distance')+
+  scale_color_manual(values = c('chartreuse4', 'cornflowerblue', 'orange', 'gray'))+
+  ylim(c(-8, 10))
+comparison_plot_distance
+ggsave(plot = comparison_plot_distance, '../plots/distance_violins.png', width = 9, height = 9, dpi = 250, units = 'in')
+```
+
+
+```{r}
+comparison_plot_distance = merged_byyear %>%
+  filter(!grepl('ferret', kind)) %>%
+  separate(kind, into = c( 'distance type', 'past/future'), sep = ":", remove = F) %>%
+  mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains')),
+         `distance type` = factor(`distance type`, levels = c('ferret distances','child distances', 'vaccine study distances', 'HaNam PCR infection distances'), ordered = TRUE),
+         lab_x = ifelse(`past/future` == ' past strains', -20, 10)) %>%
+  merge(lm_fits_table_by_ferretdistance) %>%
+  rename(individual_distance = distance) %>%
+  pivot_longer(cols = c(individual_distance, ferret_distance), values_to = 'distance', names_to = 'dist_type', names_pattern = '(\\w+)_distance') %>%
+  ggplot() +
+  geom_violin(aes(x = as.factor(dy), y = distance, color = dist_type), alpha = .7)+
+  #geom_smooth(aes(x = ferret_distance, y = distance, group = kind), method = 'lm', color = 'black') +
+  #geom_text(aes(x = lab_x, y = lab_y, label = sprintf('%2.2f%s\nR2=%2.2f', slope, slope_pval_star, rsquared)), hjust = 0)+
+ # geom_hline(aes(yintercept=0),lty=3)+
+#  geom_blank(aes(x =value+36, y = 1), data = x_lims)+
+  #geom_abline(aes(intercept = ifelse(`past/future`==' past strains', 36, 0), slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
+ # scale_color_manual(values = c('salmon', 'mediumturquoise', 'goldenrod', 'yellow3', 'red', 'slateblue4',  'red', 'dodgerblue')) +
+  xlab('temporal distance to homologous strain (years)') +
+  facet_grid(`distance type`~`past/future`, scales = 'free_x')+
+  ylab('distance')+
+  scale_color_manual(values = c('chartreuse4', 'cornflowerblue', 'orange', 'gray'))+
+  ylim(c(-8, 10))
+comparison_plot_distance
+ggsave(plot = comparison_plot_distance, '../plots/dy_violins.png', width = 9, height = 9, dpi = 250, units = 'in')
+```
+
+
 ```{r}
 max_val = max(abs(merged_byyear %>% dplyr::filter(grepl('child', kind)) %>% pull(ferret_distance)), na.rm = T)
 x_lims = tibble(`past/future` = c(' past strains', ' future strains'),
@@ -697,7 +766,7 @@ comparison_plot_distance= merged_byyear %>%
          ferret_distance = ifelse(`past/future` == ' past strains', -ferret_distance, ferret_distance)) %>%
   merge(lm_fits_table_by_ferretdistance) %>%
   ggplot() +
-  geom_point(aes(x = jitter(ferret_distance), y = jitter(distance), color = lag), alpha = .7)+
+  geom_point(aes(x = ferret_distance_binned, y = jitter(distance), color = lag), alpha = .7)+
   geom_smooth(aes(x = ferret_distance, y = distance, group = kind), method = 'lm', color = 'black') +
   geom_text(aes(x = lab_x, y = lab_y, label = sprintf('%2.2f%s\nR2=%2.2f', slope, slope_pval_star, rsquared)), hjust = 0)+
   geom_hline(aes(yintercept=0),lty=3)+

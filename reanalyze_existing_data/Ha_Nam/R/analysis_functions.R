@@ -537,3 +537,21 @@ plot_vaccine_study_by_age <- function(titer_data_frame,
 }
 
 
+import_full_HaNam_data <- function(this_path = '../../Ha_Nam/raw_data/Fonville_2014_TableS3.csv'){
+  path_to_HaNam = gsub('(.+/)Ha_Nam/raw_data/Fonville_2014_TableS3.csv', '\\1', this_path)
+  
+  raw_df = read_csv(this_path, show_col_types = F) %>% ## HaNam cohort titers
+    mutate_at(-c(1,2), .funs = ~HaNam_titers_to_numeric(.)) %>% ## Convert titer values to numeric. Report undetectable = 5, and endpoint = 1280
+    pivot_longer(-c(1,2), names_to = 'test_strain', values_to = 'titer') %>%
+    dplyr::filter(!test_strain == 'A/PHILIPPINES/472/2002_EGG') %>% ## Filter out the Egg adapted version of A/PHILIPPINES/472/2002
+    mutate(test_strain = ifelse(test_strain == 'A/PHILIPPINES/427/2002_MDCK', 'A/PHILIPPINES/472/2002', test_strain)) %>%
+    mutate(logtiter = to_log(titer)) %>%
+    tidyr::extract(col = test_strain, into = 'test_strain_year', regex = '/(\\d+)$', remove = F) %>%
+    mutate(test_strain_year = clean_years(test_strain_year)) %>%
+    merge(read_csv(paste0(path_to_HaNam, 'Ha_Nam/processed_data/YOB_inferred.csv'), show_col_types = F), by = 'Subject number') %>% ## Merge with Kangchon's annotation of PCR-confirmed infections %>%
+    merge(read_csv(paste0(path_to_HaNam, 'Ha_Nam/processed_data/HaNam_strains.csv'), show_col_types = F), by = 'test_strain') %>%
+    mutate(test_strain = full_name) %>%
+    rename(sample_year = `Sample year`,
+           `subject` = `Subject number`,
+           infection_year = `Infection Time`)
+}
