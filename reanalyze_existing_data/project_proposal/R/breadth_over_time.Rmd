@@ -64,7 +64,7 @@ pcr_infections = HaNam_titers %>%
          days_since_infection = (sample_year-infection_time)*365+days_PCR_swab_to_serum_draw,
          years_since_infection = days_since_infection/365,
              c_years_since_infection = cut(years_since_infection, breaks = c(-10, 0, 1/6, 1/2, 1, 2, 3, 6)))
-setwd('../../human_breadth_over_time/R/')
+setwd('../../project_proposal/R/')
 ```
 
 
@@ -193,15 +193,6 @@ Visually, it's hard to tell if the steepness or breadth of these landscapes vari
 
 ## Plot summary stats by time since infection
 ```{r echo = FALSE}
-# pcr_summary %>%
-#   mutate(cyrs = cut(years_since_infection, breaks = c(-6:0, .5, 1:6), ordered_result = T)) %>%
-#   ggplot(aes(x = cyrs, y = jitter(max_titer, factor = .5))) +
-#   geom_dotplot(binaxis = "y", stackdir = "center", stackratio = .7, dotsize = 2, binwidth = .025, alpha = .5) +
-#   geom_vline(aes(xintercept = 4.5), lty = 2)+
-#   ylab('max log titer of each individual (jittered)')+
-#   xlab('years since PCR confirmed infection')
-# 
-
 pcr_summary %>%
   mutate(cyrs = cut(years_since_infection, breaks = c(-6:0, .5, 1:6), ordered_result = T)) %>%
   group_by(cyrs) %>%
@@ -215,6 +206,45 @@ pcr_summary %>%
   xlab('years since PCR confirmed infection')+
   ggtitle('Max titer per individual')
 ```
+
+## Plot summary by sample order
+```{r}
+pcr_summary %>%
+  mutate(sample_index = sample_year-infection_time,
+         sample_index = factor(sample_index, levels = as.character(-4:4))) %>%
+  group_by(sample_index) %>%
+  mutate(n_samples = n(),
+            n_i = length(unique(subject)))%>%
+  ggplot(aes(x = sample_index, y = max_titer)) +
+  geom_boxplot() +
+  geom_text(aes(x = sample_index, y = 8, label = sprintf('n=%s\n%s subj', n_samples, n_i)))+
+  geom_vline(aes(xintercept = 4.5), lty = 2)+
+  ylab('max log titer of each individual (jittered)')+
+  xlab('sample index (-1=pre-infection; 0=post-infection)')+
+  ggtitle('Max titer per individual')
+```
+
+## Change over time for each individual
+```{r}
+pcr_summary %>%
+  mutate(sample_index = sample_year-infection_time,
+         sample_index = factor(sample_index, levels = as.character(-4:4))) %>%
+  ungroup() %>%
+  group_by(subject) %>%
+    select(subject, sample_index, max_titer) %>%
+  distinct() %>%
+  arrange(sample_index) %>%
+  mutate(d_max_titer = dplyr::lag(max_titer)-max_titer) %>%
+  ungroup() %>%
+  ggplot(aes(x = sample_index, y = d_max_titer)) +
+  geom_boxplot() +
+  geom_vline(aes(xintercept = 4.5), lty = 2)+
+  ylab('max log titer of each individual (jittered)')+
+  xlab('sample index (-1=pre-infection; 0=post-infection)')+
+  ggtitle('Change in max titer from the last annual sample') 
+```
+
+
 MAX TITER: The peak titer per individual is transiently elevated in samples collected within 6m of infection. It settles to a level slightly higher than the pre-infection levels in samples taken >6m after infection.
 
 ```{r echo = FALSE}

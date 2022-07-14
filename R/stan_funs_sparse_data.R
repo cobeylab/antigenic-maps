@@ -706,11 +706,12 @@ get_titer_error <- function(stan_fit,
     lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_map_distance]) %>% mutate(iter = 1:niter)}) %>%
       bind_rows(.id = 'chain') %>%
       pivot_longer(contains('map'), names_to = c('id'), names_pattern = 'map_distances.(\\d+).', values_to = 'map_distance'),
+    
     lapply(1:nchains, function(xx){as.tibble(raw_fits[,xx,is_titer]) %>% mutate(iter = 1:niter)}) %>%
       bind_rows(.id = 'chain') %>%
       pivot_longer(contains('titer'), names_to = c('id'), names_pattern = 'estimated_titers.(\\d+).', values_to = 'estimated_titer')
   )%>%
-    merge(titer_map, 
+    merge(titer_map %>% mutate(id = 1:nrow(.)), 
           by = c('id')) %>%
     arrange(serum, antigen, chain, iter)
   
@@ -922,6 +923,7 @@ convert_titer_map_to_matrix <- function(titer_map){
 
 fit_accross_dims <- function(n_dim_inputs,
                              immunodominance_flag){
+  max_dim = 7
   if(!dir.exists('diagnostic_plots')){dir.create('diagnostic_plots')}
   ## Fit maps across 1:8 dimensions
   inputs <- read_rds(sprintf('inputs/%sD_%s_immunodominance_inputs.rds', n_dim_inputs, immunodominance_flag))
@@ -929,8 +931,8 @@ fit_accross_dims <- function(n_dim_inputs,
   # Verify that all antigens and sera appear at least once in the training set
   stopifnot(all(unique(inputs$titer_map$antigen) %in% split_inputs$train$antigen))
   stopifnot(all(unique(inputs$titer_map$serum) %in% split_inputs$train$serum))
-  fit_list <- vector(mode = 'list', length = 8)
-  foreach(this_ndim = 1:8) %do% {
+  fit_list <- vector(mode = 'list', length = max_dim)
+  fit_list = foreach(this_ndim = 1:max_dim) %do% {
     cat(sprintf('Fitting %s dim model %s immunodominance\n', this_ndim, immunodominance_flag))
     this_fit <- fit_stan_MDS(mod = '../../stan/MDS_predict_titer_sparse.stan', 
                              titer_map_train = split_inputs$train, 
@@ -953,7 +955,7 @@ fit_accross_dims <- function(n_dim_inputs,
   }
  # cat(sprintf('checkpoint1'))
   print(typeof(fit_list))
-  names(fit_list) = paste0(1:8, 'D')
+  names(fit_list) = paste0(1:max_dim, 'D')
   if(!dir.exists('outputs')) dir.create('outputs')
   write_rds(fit_list, sprintf('outputs/%sDinputs-%s-fit_list.rds', n_dim_inputs, immunodominance_flag))
   write_rds(split_inputs, sprintf('outputs/%sDinputs-%s-test_train_split.rds', n_dim_inputs, immunodominance_flag))

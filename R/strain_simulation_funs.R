@@ -152,7 +152,7 @@ r # Maximum log2 titer
                             tol =  .Machine$double.eps^.5)       
   
   ## Verify that the solution returns 0
-  stopifnot(zeroish(titer_fun(numerical_soln$root, ab_position_list, x_ag, alpha, r, relative_concentrations)))
+  stopifnot(zeroish(titer_fun(numerical_soln$root, ab_position_list, x_ag, alpha, r)))
   
   return(numerical_soln$root)
 }
