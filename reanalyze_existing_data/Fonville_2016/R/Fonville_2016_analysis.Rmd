@@ -690,7 +690,9 @@ run_lm_by_ferret_distance <- function(ferret_distance, distance, kind){
          rsquared = summary(this_fit)$r.squared,
          slope_pval = summary(this_fit)$coefficients[2,4],
          slope_pval_star = ifelse(slope_pval<0.05, '*', ''),
-         equation = sprintf('y=%2.2f+%2.2fx', intercept, slope))
+         equation = sprintf('y=%2.2f+%2.2fx', intercept, slope), 
+         slope_lower = slope-1.96*summary(this_fit)$coefficients[2,2],
+         slope_upper = slope+1.96*summary(this_fit)$coefficients[2,2])
 }
 
 lm_fits_table_by_ferretdistance = lapply(unique(merged_byyear$kind)[-c(1,2)], function(kk){
@@ -713,7 +715,9 @@ run_lm_byyear <- function(dy, distance, kind){
          rsquared = summary(this_fit)$r.squared,
          slope_pval = summary(this_fit)$coefficients[2,4],
          slope_pval_star = ifelse(slope_pval<0.05, '*', ''),
-         equation = sprintf('y=%2.2f+%2.2fx', intercept, slope))
+         equation = sprintf('y=%2.2f+%2.2fx', intercept, slope),
+         slope_lower = slope-1.96*summary(this_fit)$coefficients[2,2],
+         slope_upper = slope+1.96*summary(this_fit)$coefficients[2,2])
 }
 
 lm_fits_table_by_year = lapply(unique(merged_byyear$kind), function(kk){
@@ -775,6 +779,8 @@ x_lims = tibble(`past/future` = c(' past strains', ' future strains'),
   pivot_longer(-1)
 
 comparison_plot_distance= merged_byyear %>%
+  mutate(lag = ifelse('<=30d', lag,
+                      ifelse('>=90d', lag, 'unknown'))) %>%
   filter(!grepl('ferret', kind)) %>%
   separate(kind, into = c( 'distance type', 'past/future'), sep = ":", remove = F) %>%
   mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains')),
@@ -799,6 +805,67 @@ comparison_plot_distance= merged_byyear %>%
 ggsave(plot = comparison_plot_distance, '../plots/distances_by_distance_child_ferret_adult.png', width = 9, height = 9, dpi = 250, units = 
          'in')
 ```
+
+## Coefficient by type
+```{r}
+slope_plot = lm_fits_table_by_ferretdistance %>%
+  mutate(label = c('primary: future', 'primary: past', 'secondary: future', 'secondary: past', 'secondary: past', 'secondary: future'),
+         kind = factor(kind, labels = c('primary infection:\nfuture strains',
+                                        'primary infection:\npast strains',
+                                        'secondary vaccination:\nfuture strains',
+                                        'secondary vaccination:\npast strains',
+                                        'secondary infection:\npast strains',
+                                        'secondary infection:\nfuture strains'))) %>%
+  ggplot() +
+  geom_point(aes(x = abs(slope), y = kind, color = label)) +
+  geom_segment(aes(x = abs(slope_lower), xend = abs(slope_upper), y = kind, yend = kind, color = label)) +
+  scale_color_manual(values = c('dodgerblue', 'blue4', 'orange', 'red3')) +
+  ylab('')+xlab('slope') +
+  theme(legend.position = 'below')
+
+R2plot = lm_fits_table_by_ferretdistance %>%
+  mutate(label = c('primary: future', 'primary: past', 'secondary: future', 'secondary: past', 'secondary: past', 'secondary: future'),
+         kind = factor(kind, labels = c('primary infection:\nfuture strains',
+                                        'primary infection:\npast strains',
+                                        'secondary vaccination:\nfuture strains',
+                                        'secondary vaccination:\npast strains',
+                                        'secondary infection:\npast strains',
+                                        'secondary infection:\nfuture strains'))) %>%
+  ggplot() +
+  geom_bar(aes(x = rsquared, y = kind, color = label, fill = label), stat = 'identity') +
+  scale_color_manual(values = c('dodgerblue', 'blue4', 'orange', 'red3'), aesthetics = c('color', 'fill')) +
+  ylab('')+xlab('R squared') +
+  theme(legend.position = 'below')
+
+frac_negative = merged_byyear %>%
+  group_by(kind) %>%
+  filter(!is.na(distance)) %>%
+  filter(!grepl('ferret', kind)) %>%
+  summarise(n_negative = sum(distance<0),
+            n = n(),
+            frac_negative = n_negative/n) %>%
+  rowwise() %>%
+  mutate(lower = binom::binom.confint(n_negative, n)[11, 5],
+         upper = binom::binom.confint(n_negative, n)[11, 6]) %>%
+  ungroup() %>%
+  mutate(kind = factor(kind, labels = c('primary infection:\nfuture strains',
+                                        'primary infection:\npast strains',
+                                        'secondary vaccination:\nfuture strains',
+                                        'secondary vaccination:\npast strains',
+                                        'secondary infection:\npast strains',
+                                        'secondary infection:\nfuture strains')),
+         label = c('primary: future', 'primary: past', 'secondary: future', 'secondary: past', 'secondary: past', 'secondary: future')) %>%
+  ggplot()+
+  geom_point(aes(x = frac_negative, y = kind, color = label)) +
+  geom_segment(aes(x = abs(lower), xend = abs(upper), y = kind, yend = kind, color = label)) +
+  scale_color_manual(values = c('dodgerblue', 'blue4', 'orange', 'red3')) +
+  ylab('')+xlab('frac. individual distances <0') +
+  theme(legend.position = 'below')
+
+cowplot::plot_grid(slope_plot, R2plot, frac_negative, ggplot()+geom_blank(),
+                   nrow = 4, labels = list('G', 'H', 'I', 'J'))
+```
+
 
 
 ## Re-plot using violins
