@@ -779,16 +779,20 @@ x_lims = tibble(`past/future` = c(' past strains', ' future strains'),
   pivot_longer(-1)
 
 comparison_plot_distance= merged_byyear %>%
-  mutate(lag = ifelse('<=30d', lag,
-                      ifelse('>=90d', lag, 'unknown'))) %>%
+  mutate(lag = ifelse(lag == '<=30d', lag,
+                      ifelse(lag == '>90d', lag, 'unknown'))) %>%
   filter(!grepl('ferret', kind)) %>%
   separate(kind, into = c( 'distance type', 'past/future'), sep = ":", remove = F) %>%
   mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains')),
-         `distance type` = factor(`distance type`, levels = c('ferret distances','child distances', 'vaccine study distances', 'HaNam PCR infection distances'), ordered = TRUE),
+         `distance type` = factor(`distance type`, 
+                                  levels = c('ferret distances','child distances', 'vaccine study distances', 'HaNam PCR infection distances'),
+                                  labels = c('ferret distances','primary infection', 'secondary vaccination', 'secondary infection'),
+                                  ordered = TRUE),
          lab_x = ifelse(`past/future` == ' past strains', -20, 10),
          lab_y = 8,
          ferret_distance = ifelse(`past/future` == ' past strains', -ferret_distance, ferret_distance)) %>%
   merge(lm_fits_table_by_ferretdistance) %>%
+  mutate(labs = factor(kind, labels = c('B.', 'A.', 'F.', 'E.', 'D.', 'C.'))) %>%
   ggplot() +
   geom_point(aes(x = jitter(ferret_distance), y = jitter(distance), color = lag), alpha = .7)+
   geom_smooth(aes(x = ferret_distance, y = distance, group = kind), method = 'lm', color = 'black') +
@@ -799,8 +803,9 @@ comparison_plot_distance= merged_byyear %>%
  # scale_color_manual(values = c('salmon', 'mediumturquoise', 'goldenrod', 'yellow3', 'red', 'slateblue4',  'red', 'dodgerblue')) +
   xlab('ferret distance from homologous strain to test strain') +
   facet_grid(`distance type`~`past/future`, scales = 'free_x')+
-  ylab('distance')+
-  scale_color_manual(values = c('chartreuse4', 'cornflowerblue', 'orange', 'gray'))+
+  geom_text(aes(x = ifelse(`past/future` == ' past strains', -35, 1), y = 9, label = labs))+
+  ylab('individualdistance')+
+  scale_color_manual(values = c('goldenrod', 'cornflowerblue', 'gray'))+
   ylim(c(-8, 10))
 ggsave(plot = comparison_plot_distance, '../plots/distances_by_distance_child_ferret_adult.png', width = 9, height = 9, dpi = 250, units = 
          'in')
@@ -863,7 +868,7 @@ frac_negative = merged_byyear %>%
   theme(legend.position = 'below')
 
 cowplot::plot_grid(slope_plot, R2plot, frac_negative, ggplot()+geom_blank(),
-                   nrow = 4, labels = list('G', 'H', 'I', 'J'))
+                   nrow = 2, labels = list('G', 'H', 'I', 'J'))
 ```
 
 
