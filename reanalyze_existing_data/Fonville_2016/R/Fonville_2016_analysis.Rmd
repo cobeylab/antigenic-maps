@@ -444,13 +444,40 @@ titer_summary  %>% select(id, kind, max_logtiter, n_detectable, steepness) %>%
   facet_grid(.~statistic, scales = 'free_x')
 ggsave('../plots/ferret_child_titer_summary.png', width = 7.5, height = 3.5, units = 'in', dpi = 200)
 ```
+
+```{r}
+titer_summary  %>% select(id, kind, max_logtiter, n_detectable, steepness) %>%
+  distinct() %>%
+  pivot_longer(3:5, names_to = 'statistic', values_to = 'value') %>%
+  ggplot() +
+  geom_histogram(aes(x = value, fill = kind), alpha = .5, position = 'dodge', binwidth = 1) +
+ # geom_point(aes(x = jitter(as.numeric(as.factor(kind))), y = value, color = id), show.legend = F)+
+  facet_grid(.~statistic)
+ggsave('../plots/ferret_child_titer_summary.png', width = 7.5, height = 3.5, units = 'in', dpi = 200)
+```
+
+```{r}
+titer_summary  %>% select(id, kind, max_logtiter, n_detectable, steepness) %>%
+  distinct() %>%
+  pivot_longer(3:5, names_to = 'statistic', values_to = 'value') %>%
+  group_by(kind) %>%
+  mutate(n_kind = length(unique(id))) %>%
+  ungroup() %>%
+  mutate(statistic = factor(statistic, levels = c('max_logtiter', 'n_detectable', 'steepness'), labels = c('height','width','steepness')),
+           kind = factor(kind, labels = unique(sprintf('%s (n=%i)', kind, n_kind)))) %>%
+  ggplot() +
+  geom_boxplot(aes(x = statistic, y = value, fill = kind), alpha = .5) +
+  xlab('')+
+  theme(legend.position = c(.8, .8))
+ggsave('../plots/ferret_child_titer_boxplots.png', width = 7.5, height = 2.5, units = 'in', dpi = 200)
+```
 ## Look at distances by ferret distance
 ## Look at distances by year
 
 ```{r}
 parse_lag <- function(lag){
   ifelse(lag <= 30, '<=30d',
-         ifelse(lag <= 90, '<=90d', '>90d'))
+        ifelse(lag <= 90, 'unknown', '>90d'))
 }
 
 ferret_byyear = ferret_distances %>%
@@ -462,9 +489,11 @@ ferret_byyear = ferret_distances %>%
   mutate(id = (as.factor(homologous_strain)), 
          kind = 'ferret',
          lag = parse_lag(30)) %>%
-  select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, lag)
+  select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, lag) %>%
+  distinct()
 
 child_byyear = merged_distances %>%
+  ungroup() %>%
   filter(logtiter >= 0) %>% #exclude undetectable titers
   mutate(primary_strain_year = extract_strain_year(putative_primary_strain),
          dy =  strain_year-primary_strain_year) %>%
@@ -474,10 +503,9 @@ child_byyear = merged_distances %>%
          homologous_strain = putative_primary_strain,
          homologous_strain_year = primary_strain_year) %>%
   mutate(kind = 'child',
-         lag = parse_lag(max_lag),
-         lag = ifelse(lag == '>90d', 'unknown', lag)) %>%
+         lag = parse_lag(max_lag)) %>%
   select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, ferret_distance, lag) %>%
-  ungroup()
+  distinct()
 
 ## Add adult distances
 vaccine_1995 = read_csv('../../Ha_Nam/processed_data/vaccinations_1995.csv') %>%
@@ -491,7 +519,8 @@ vaccine_1995 = read_csv('../../Ha_Nam/processed_data/vaccinations_1995.csv') %>%
          dy = strain_year-homologous_strain_year,
          id = as.character(id),
          lag = parse_lag(30)) %>%
-  select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, ferret_distance, lag)
+  select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, ferret_distance, lag) %>%
+  distinct()
 
 vaccine_1997 = read_csv('../../Ha_Nam/processed_data/vaccinations_1997.csv')%>%
   mutate(kind = 'vaccine study') %>%
@@ -504,7 +533,8 @@ vaccine_1997 = read_csv('../../Ha_Nam/processed_data/vaccinations_1997.csv')%>%
          dy = strain_year-homologous_strain_year,
          id = as.character(id),
          lag = parse_lag(30)) %>%
-  select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, ferret_distance, lag)
+  select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, ferret_distance, lag) %>%
+  distinct()
 
 PCR_infections = read_csv('../../Ha_Nam/processed_data/PCR_infections.csv') %>%
   filter(logtiter >=0) %>%
@@ -517,7 +547,8 @@ PCR_infections = read_csv('../../Ha_Nam/processed_data/PCR_infections.csv') %>%
          dy = strain_year-homologous_strain_year,
          id = as.character(id),
          lag = parse_lag(days_PCR_swab_to_serum_draw)) %>%
-  select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, ferret_distance, lag)
+  select(kind, id, homologous_strain, strain, homologous_strain_year, strain_year, dy, distance, ferret_distance, lag) %>%
+  distinct()
 
 ## Bind with the child and ferret distances
 merged_byyear = bind_rows(ferret_byyear,
@@ -525,7 +556,9 @@ merged_byyear = bind_rows(ferret_byyear,
                           vaccine_1995,
                           vaccine_1997,
                           PCR_infections) %>%
-  mutate(kind = sprintf('%s distances: %s strains', kind, ifelse(dy<0, 'past', 'future'))) 
+  mutate(kind_combined = kind,
+         kind = sprintf('%s distances: %s strains', kind, ifelse(dy<0, 'past', 'future')),
+         pf = ifelse(dy<0, 'past', 'future')) 
 ```
 
 
@@ -622,7 +655,7 @@ ggsave('../../draft_manuscript_figures/plots/secondary_representative_indiv.png'
 
 
 ```{r}
-one_lm <- function(formula, df){
+one_lme <- function(formula, df){
   this_fit = lm(formula = as.formula(formula), data = df)
 
   list(fit = this_fit,
@@ -634,35 +667,52 @@ one_lm <- function(formula, df){
 ```
 
 ```{r}
-child_lm_data = merged_distances %>%
-  filter(logtiter >= 0) %>%
-  mutate(primary_strain_year = extract_strain_year(putative_primary_strain), 
-         dy = strain_year - primary_strain_year,
-         `past/future` = ifelse(dy<0, 'past', 'future')) %>%
-  select(subject, strain, putative_primary_strain, ferret_map_distance, age_mos, season, n_seasons, `past/future`, individual_distance) %>%
-  mutate(`<=1_season` = as.factor(n_seasons<=1),
-         ferret_overestimate = ferret_map_distance - individual_distance)
+# child_lm_data = merged_distances %>%
+#   filter(logtiter >= 0) %>%
+#   mutate(primary_strain_year = extract_strain_year(putative_primary_strain), 
+#          dy = strain_year - primary_strain_year,
+#          `past/future` = ifelse(dy<0, 'past', 'future')) %>%
+#   select(subject, strain, putative_primary_strain, ferret_map_distance, age_mos, season, n_seasons, `past/future`, individual_distance) %>%
+#   mutate(`<=1_season` = as.factor(n_seasons<=1),
+#          ferret_overestimate = ferret_map_distance - individual_distance)
 ```
 
 ```{r}
-formula_vec = c('individual_distance ~ ferret_map_distance', 
-                'individual_distance ~ ferret_map_distance + `<=1_season`',
-                'individual_distance ~ ferret_map_distance + `<=1_season`*`past/future`',
-                'individual_distance ~ ferret_map_distance*`past/future`',
-                'individual_distance ~ ferret_map_distance*`past/future` + `<=1_season`',
-                 'individual_distance ~ ferret_map_distance + `<=1_season` + `past/future`' ) 
+formula_vec = c('distance ~ ferret_distance', 
+                'distance ~ ferret_distance + lag ',
+                'distance ~ ferret_distance*pf', # pf stands for past/future
+                'distance ~ ferret_distance*pf + lag', # separate slopes for past/future
+                'distance ~ ferret_distance + lag + pf' ) # separate intercepts for past_future
 
 ## Run all fits
-child_fit_list = lapply(formula_vec, one_lm, df = child_lm_data) 
+child_fit_list_past = lapply(formula_vec, one_lm, df = merged_byyear %>% filter(kind_combined == 'child')) 
+secondary_infection_fit_list = lapply(formula_vec, one_lm, df = merged_byyear %>% filter(kind_combined == 'HaNam PCR infection'))
+vaccine_fit_list = lapply(formula_vec[c(1,3)], one_lm, df = merged_byyear %>% filter(kind_combined == 'vaccine study')) 
 ```
 
 ## Del AIC
 ```{r}
-child_fit_table = lapply(child_fit_list, function(ll) ll$summary)%>%
+summarize_fits = function(fit_list){
+  lapply(fit_list, function(ll) ll$summary)%>%
   bind_rows() %>%
   arrange(AIC) %>%
   mutate(del_AIC = AIC-min(AIC))
+}
+```
+
+```{r}
+child_fit_table = summarize_fits(child_fit_list)
 child_fit_table
+```
+
+```{r}
+secondary_fit_table = summarize_fits(secondary_infection_fit_list)
+secondary_fit_table
+```
+
+```{r}
+vaccine_fit_table = summarize_fits(vaccine_fit_list)
+vaccine_fit_table
 ```
 ## F test 
 ```{r}
@@ -672,37 +722,57 @@ anova(child_fit_list[[1]]$fit,
       child_fit_list[[4]]$fit)
 ```
 
-## Summary of best fit
+## Repeat, fitting separately to past/future strains
 ```{r}
-lm(formula = as.formula(as.matrix(child_fit_table[1,1])), data = child_lm_data) %>%
-  summary()
+formula_vec = c('distance ~ ferret_distance', 
+                'distance ~ ferret_distance + lag ') # separate slopes for past/future
+
+## Run all fits
+kinds = unique(merged_byyear$kind)[c(3,4,7,8)]
+kinds
+
+child_future_fit_list =  lapply(formula_vec, one_lm, df = merged_byyear %>% filter(kind == kinds[1]))
+child_past_fit_list =  lapply(formula_vec, one_lm, df = merged_byyear %>% filter(kind == kinds[2]))
+secondary_future_fit_list = lapply(formula_vec, one_lm, df = merged_byyear %>% filter(kind == kinds[4]))
+secondary_past_fit_list = lapply(formula_vec, one_lm, df = merged_byyear %>% filter(kind == kinds[3]))
+```
+
+```{r}
+summarize_fits(child_future_fit_list)
+summarize_fits(child_past_fit_list)
+summarize_fits(secondary_past_fit_list)
+summarize_fits(secondary_future_fit_list)
 ```
 
 
 
+
 ```{r}
-run_lm_by_ferret_distance <- function(ferret_distance, distance, kind){
-  this_fit = lm(distance ~ ferret_distance)
- # print(summary(this_fit))
-  tibble(kind = unique(kind),
-         slope = this_fit$coefficients[2],
-         intercept = this_fit$coefficients[1],
-         rsquared = summary(this_fit)$r.squared,
-         slope_pval = summary(this_fit)$coefficients[2,4],
-         slope_pval_star = ifelse(slope_pval<0.05, '*', ''),
-         equation = sprintf('y=%2.2f+%2.2fx', intercept, slope), 
-         slope_lower = slope-1.96*summary(this_fit)$coefficients[2,2],
-         slope_upper = slope+1.96*summary(this_fit)$coefficients[2,2])
-}
-
-lm_fits_table_by_ferretdistance = lapply(unique(merged_byyear$kind)[-c(1,2)], function(kk){
-  this_df = filter(merged_byyear, kind == kk) 
-       run_lm_by_ferret_distance(ferret_distance = this_df$ferret_distance, distance = this_df$distance, kind = this_df$kind)
-}) %>%
-  bind_rows()
-
-lm_fits_table_by_ferretdistance
+# ## Simple regression of distance by ferret distance
+# run_lm_by_ferret_distance <- function(ferret_distance, distance, kind){
+#   this_fit = lm(distance ~ ferret_distance)
+#   tibble(kind = unique(kind),
+#          slope = this_fit$coefficients[2],
+#          intercept = this_fit$coefficients[1],
+#          rsquared = summary(this_fit)$r.squared,
+#          slope_pval = summary(this_fit)$coefficients[2,4],
+#          slope_pval_star = ifelse(slope_pval<0.05, '*', ''),
+#          equation = sprintf('y=%2.2f+%2.2fx', intercept, slope), 
+#          slope_lower = slope-1.96*summary(this_fit)$coefficients[2,2],
+#          slope_upper = slope+1.96*summary(this_fit)$coefficients[2,2])
+# }
+# 
+# lm_fits_table_by_ferretdistance = lapply(unique(merged_byyear$kind)[-c(1,2)], function(kk){
+#   this_df = filter(merged_byyear, kind == kk) 
+#        run_lm_by_ferret_distance(ferret_distance = this_df$ferret_distance, distance = this_df$distance, kind = this_df$kind)
+# }) %>%
+#   bind_rows()
+# 
+# lm_fits_table_by_ferretdistance
 ```
+
+
+
 
 
 ```{r}
@@ -771,6 +841,54 @@ ggsave(plot = comparison_plot, '../plots/distances_by_year_child_ferret_adult.pn
          'in')
 ```
 
+
+
+
+## Return predictions of each fit:
+```{r}
+## Simple regression of distance by ferret distance
+merged_fits_simple = lapply(unique(merged_byyear$kind)[-c(1,2)], function(kk){
+  this_df = filter(merged_byyear, kind == kk) %>%
+    distinct()
+  this_fit = lm(distance ~ ferret_distance, data = this_df)
+  this_prediction = predict.lm(this_fit, se.fit = TRUE, newdata = this_df)
+  this_df %>%
+    ungroup() %>%
+    mutate(prediction = this_prediction$fit,
+           pred_low = this_prediction$fit - 1.96*this_prediction$se.fit,
+           pred_high = this_prediction$fit + 1.96*this_prediction$se.fit,
+           slope = this_fit$coefficients[2],
+         intercept = this_fit$coefficients[1],
+         rsquared = summary(this_fit)$r.squared,
+         slope_pval = summary(this_fit)$coefficients[2,4],
+         slope_pval_star = ifelse(slope_pval<0.05, '*', ''),
+         equation = sprintf('y=%2.2f+%2.2fx', intercept, slope), 
+         slope_lower = slope-1.96*summary(this_fit)$coefficients[2,2],
+         slope_upper = slope+1.96*summary(this_fit)$coefficients[2,2])
+}) %>%
+  bind_rows()
+```
+
+## relabel merged_fits_simple
+```{r}
+merged_fits_simple = merged_fits_simple %>%
+  separate(kind, into = c( 'distance type', 'past/future'), sep = ":", remove = F) %>%
+  mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains')),
+         `distance type` = factor(`distance type`, 
+                                  levels = c('ferret distances','child distances', 
+                                             'vaccine study distances', 
+                                             'HaNam PCR infection distances'),
+                                  labels = c('ferret distances',
+                                             'primary infection', 
+                                             'secondary vaccination', 
+                                             'secondary infection'),
+                                  ordered = TRUE),
+                  lab_x = ifelse(`past/future` == ' past strains', -20, 10),
+         lab_y = 8,
+         ferret_distance = ifelse(`past/future` == ' past strains', -ferret_distance, ferret_distance))
+
+```
+
 ```{r}
 x_lims = tibble(`past/future` = c(' past strains', ' future strains'),
                 xmin = c(-max(abs(merged_byyear$ferret_distance), na.rm = T), 0),
@@ -778,38 +896,119 @@ x_lims = tibble(`past/future` = c(' past strains', ' future strains'),
   mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains'))) %>%
   pivot_longer(-1)
 
-comparison_plot_distance= merged_byyear %>%
-  mutate(lag = ifelse(lag == '<=30d', lag,
-                      ifelse(lag == '>90d', lag, 'unknown'))) %>%
+comparison_plot_distance= merged_fits_simple %>%
   filter(!grepl('ferret', kind)) %>%
-  separate(kind, into = c( 'distance type', 'past/future'), sep = ":", remove = F) %>%
-  mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains')),
-         `distance type` = factor(`distance type`, 
-                                  levels = c('ferret distances','child distances', 'vaccine study distances', 'HaNam PCR infection distances'),
-                                  labels = c('ferret distances','primary infection', 'secondary vaccination', 'secondary infection'),
-                                  ordered = TRUE),
-         lab_x = ifelse(`past/future` == ' past strains', -20, 10),
-         lab_y = 8,
-         ferret_distance = ifelse(`past/future` == ' past strains', -ferret_distance, ferret_distance)) %>%
-  merge(lm_fits_table_by_ferretdistance) %>%
   mutate(labs = factor(kind, labels = c('B.', 'A.', 'F.', 'E.', 'D.', 'C.'))) %>%
   ggplot() +
-  geom_point(aes(x = jitter(ferret_distance), y = jitter(distance), color = lag), alpha = .7)+
-  geom_smooth(aes(x = ferret_distance, y = distance, group = kind), method = 'lm', color = 'black') +
+  geom_point(aes(x = jitter(ferret_distance), y = jitter(distance), color = lag), show.legend = F, alpha = .7)+
+  geom_line(aes(x = ferret_distance, y = prediction)) +
+  geom_ribbon(aes(x = ferret_distance, ymin = pred_low, ymax = pred_high), alpha = .3) +
   geom_text(aes(x = lab_x, y = lab_y, label = sprintf('%2.2f%s\nR2=%2.2f', slope, slope_pval_star, rsquared)), hjust = 0)+
   geom_hline(aes(yintercept=0),lty=3)+
   geom_blank(aes(x =value, y = 1), data = x_lims)+
-  geom_abline(aes(intercept = 0, slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
- # scale_color_manual(values = c('salmon', 'mediumturquoise', 'goldenrod', 'yellow3', 'red', 'slateblue4',  'red', 'dodgerblue')) +
+  #geom_abline(aes(intercept = 0, slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
   xlab('ferret distance from homologous strain to test strain') +
   facet_grid(`distance type`~`past/future`, scales = 'free_x')+
-  geom_text(aes(x = ifelse(`past/future` == ' past strains', -35, 1), y = 9, label = labs))+
+  #geom_text(aes(x = ifelse(`past/future` == ' past strains', -35, 1), y = 9, label = labs))+
   ylab('individualdistance')+
   scale_color_manual(values = c('goldenrod', 'cornflowerblue', 'gray'))+
+  #scale_color_viridis_d()+
   ylim(c(-8, 10))
-ggsave(plot = comparison_plot_distance, '../plots/distances_by_distance_child_ferret_adult.png', width = 9, height = 9, dpi = 250, units = 
-         'in')
+comparison_plot_distance
+ggsave(plot = comparison_plot_distance, '../plots/distances_by_distance_child_ferret_adult.png', width = 9, height = 9, dpi = 250, units = 'in')
 ```
+
+
+```{r}
+x_lims = tibble(`past/future` = c(' past strains', ' future strains'),
+                xmin = c(-max(abs(merged_byyear$ferret_distance), na.rm = T), 0),
+                xmax = c(0, max(abs(merged_byyear$ferret_distance), na.rm = T))) %>%
+  mutate(`past/future` = factor(`past/future`, levels = c(' past strains',' future strains'))) %>%
+  pivot_longer(-1)
+
+comparison_plot_distance= merged_fits_simple %>%
+  filter(!grepl('ferret', kind)) %>%
+  mutate(labs = factor(kind, labels = c('B.', 'A.', 'F.', 'E.', 'D.', 'C.'))) %>%
+  ggplot() +
+  geom_point(aes(x = jitter(ferret_distance), y = jitter(distance)), show.legend = F, alpha = .7)+
+  geom_line(aes(x = ferret_distance, y = prediction)) +
+  geom_ribbon(aes(x = ferret_distance, ymin = prediction-2, ymax = prediction+2), alpha = .3) +
+  #geom_text(aes(x = lab_x, y = lab_y, label = sprintf('%2.2f%s\nR2=%2.2f', slope, slope_pval_star, rsquared)), hjust = 0)+
+  geom_hline(aes(yintercept=0),lty=3)+
+  geom_blank(aes(x =value, y = 1), data = x_lims)+
+  #geom_abline(aes(intercept = 0, slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
+  xlab('ferret distance from homologous strain to test strain') +
+  facet_grid(`distance type`~`past/future`, scales = 'free_x')+
+  #geom_text(aes(x = ifelse(`past/future` == ' past strains', -35, 1), y = 9, label = labs))+
+  ylab('individualdistance')+
+ # scale_color_manual(values = c('goldenrod', 'cornflowerblue', 'gray'))+
+  scale_color_viridis_d()+
+  ylim(c(-8, 10))
+comparison_plot_distance
+ggsave(plot = comparison_plot_distance, '../plots/distances_by_distance_child_ferret_adult_4fold.png', width = 9, height = 9, dpi = 250, units = 'in')
+```
+
+
+
+## Make barplots
+
+```{r}
+merged_fits_simple %>%
+  mutate(prediction_error = distance - prediction) %>% 
+  ggplot() +
+  geom_histogram(aes(x = prediction_error, fill = lag)) +
+  facet_grid(`distance type`~`past/future`, scales = 'free_y')+
+  scale_fill_manual(values = c('goldenrod', 'cornflowerblue', 'gray'))+
+  geom_vline(aes(xintercept = c(-2)), lty = 2)+
+  geom_vline(aes(xintercept = c(2)), lty = 2)
+```
+```{r}
+merged_fits_simple %>%
+  mutate(prediction_error = distance - prediction) %>% 
+ # filter(!grepl(x = kind, pattern = 'vaccine')) %>%
+  ggplot() +
+  geom_histogram(aes(x = prediction_error, fill = id), show.legend = F) +
+  facet_grid(`distance type`~`past/future`, scales = 'free_y')+
+  geom_vline(aes(xintercept = c(-2)), lty = 2)+
+  geom_vline(aes(xintercept = c(2)), lty = 2)
+```
+
+
+```{r}
+merged_fits_simple %>%
+  group_by(kind, id) %>%
+  summarise(frac_lost_cross_reactivity = sum((distance-prediction)>=2, na.rm = T)/n()) %>%
+  ungroup()
+```
+
+## Highlight indivs that lost
+```{r}
+comparison_plot_distance=merged_fits_simple %>%
+  filter(!grepl('ferret', kind)) %>%
+  mutate(special_id = 'T') %>%
+  ggplot() +
+  geom_point(aes(x = jitter(ferret_distance), y = jitter(distance), color = special_id), show.legend = F, alpha = .7)+
+  #  geom_point(aes(x = jitter(ferret_distance), y = jitter(distance)), show.legend = F, alpha = .7, color = 'red', data = merged_fits_simple %>% filter(id == 'S04-3'))+
+  geom_line(aes(x = ferret_distance, y = prediction)) +
+  geom_ribbon(aes(x = ferret_distance, ymin = prediction-2, ymax = prediction+2), alpha = .3) +
+ # geom_text(aes(x = lab_x, y = lab_y, label = sprintf('%2.2f%s\nR2=%2.2f', slope, slope_pval_star, rsquared)), hjust = 0)+
+  geom_hline(aes(yintercept=0),lty=3)+
+  geom_blank(aes(x =value, y = 1), data = x_lims)+
+  geom_abline(aes(intercept = 0, slope = ifelse(`past/future`==' past strains', -1, 1)), lty = 2) +
+  xlab('ferret distance from homologous strain to test strain') +
+  facet_grid(`distance type`~`past/future`, scales = 'free_x')+
+  #geom_text(aes(x = ifelse(`past/future` == ' past strains', -35, 1), y = 9, label = labs))+
+  ylab('individualdistance')+
+ # scale_color_manual(values = c('goldenrod', 'cornflowerblue', 'gray'))+
+  scale_color_viridis_d()+
+  ylim(c(-8, 10))
+ggsave(plot = comparison_plot_distance, '../plots/distances_by_distance_child_ferret_specialID_1to1.png', width = 9, height = 9, dpi = 250, units = 'in')
+```
+
+
+
+
+
 
 ## Coefficient by type
 ```{r}
@@ -1131,4 +1330,12 @@ merged_distances %>%
 
 
 
+## Compare adjusted fits
+
+```{r}
+secondary_data = merged_byyear %>%
+  filter(grepl(kind, pattern = 'PCR')) 
+
+base_fit = 
+```
 
